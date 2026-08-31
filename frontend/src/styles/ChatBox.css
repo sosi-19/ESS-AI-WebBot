@@ -1,0 +1,542 @@
+/* =========================================================
+   CHAT CONTAINER
+========================================================= */
+
+.chat-container {
+  width: 100% !important;
+  height: 100% !important;
+
+  min-width: 0;
+  min-height: 0;
+
+  display: flex;
+  flex-direction: column;
+
+  flex: 1 1 auto;
+
+  margin: 0;
+  padding: 0;
+
+  background: #ffffff;
+
+  overflow: hidden;
+
+  box-sizing: border-box;
+}
+
+
+/* =========================================================
+   MESSAGES
+========================================================= */
+
+.messages {
+  width: 100%;
+  min-width: 0;
+  min-height: 0;
+
+  flex: 1 1 auto;
+
+  overflow-y: auto;
+
+  padding: 25px 35px;
+
+  box-sizing: border-box;
+}
+
+
+/* =========================================================
+   MESSAGE
+========================================================= */
+
+.message {
+  width: fit-content;
+
+  max-width: 70%;
+
+  padding: 12px 16px;
+
+  margin-bottom: 15px;
+
+  border-radius: 12px;
+
+  line-height: 1.5;
+
+  font-size: 15px;
+
+  box-sizing: border-box;
+
+  word-wrap: break-word;
+  overflow-wrap: break-word;
+}
+
+
+/* =========================================================
+   USER MESSAGE
+========================================================= */
+
+.user {
+  margin-left: auto;
+  margin-right: 0;
+
+  background: #2f80ed;
+
+  color: white;
+}
+
+
+/* =========================================================
+   BOT MESSAGE
+========================================================= */
+
+.bot {
+  margin-right: auto;
+  margin-left: 0;
+
+  background: #f7f7f8;
+
+  border: 1px solid #ddd;
+
+  color: #222;
+}
+
+
+/* =========================================================
+   SOURCES
+========================================================= */
+
+.sources {
+  margin-top: 10px;
+
+  font-size: 13px;
+
+  color: #555;
+}
+
+.source-item {
+  margin-top: 5px;
+}
+
+.source-category {
+  color: #777;
+
+  font-size: 12px;
+}
+
+
+/* =========================================================
+   UPLOAD PREVIEW
+========================================================= */
+
+.upload-preview {
+  width: calc(100% - 50px);
+
+  margin: 0 25px 8px 25px;
+
+  padding: 9px 12px;
+
+  display: flex;
+  align-items: center;
+
+  gap: 12px;
+
+  background: #f1f5f9;
+
+  border: 1px solid #e2e8f0;
+
+  border-radius: 9px;
+
+  font-size: 14px;
+
+  color: #333;
+
+  box-sizing: border-box;
+
+  flex-shrink: 0;
+}
+
+
+/* PDF filename */
+
+.upload-preview span:first-child {
+  flex: 1;
+
+  min-width: 0;
+
+  overflow: hidden;
+
+  text-overflow: ellipsis;
+
+  white-space: nowrap;
+}
+
+
+/* =========================================================
+   UPLOAD / REMOVE BUTTONS
+========================================================= */
+
+.upload-preview button {
+  flex-shrink: 0;
+
+  border: none;
+
+  border-radius: 6px;
+
+  padding: 6px 12px;
+
+  background: #2563eb;
+
+  color: white;
+
+  cursor: pointer;
+
+  font-size: 13px;
+}
+
+.upload-preview button:hover {
+  background: #1d4ed8;
+}
+
+
+/* =========================================================
+   UPLOAD MESSAGE
+========================================================= */
+
+.upload-message {
+  width: 100%;
+
+  padding: 4px 25px 8px 25px;
+
+  font-size: 13px;
+
+  color: #555;
+
+  box-sizing: border-box;
+
+  flex-shrink: 0;
+}
+
+
+/* =========================================================
+   INPUT AREA
+========================================================= */
+
+.input-area {
+  width: 100%;
+
+  min-height: 80px;
+
+  display: flex;
+
+  align-items: center;
+
+  padding: 15px 25px;
+
+  border-top: 1px solid #ddd;
+
+  background: #ffffff;
+
+  box-sizing: border-box;
+
+  flex-shrink: 0;
+
+  margin-top: auto;
+}
+
+
+/* =========================================================
+   UPLOAD BUTTON
+========================================================= */
+
+.upload-btn {
+  width: 50px;
+  height: 50px;
+
+  flex-shrink: 0;
+
+  margin-right: 10px;
+
+  display: flex;
+
+  align-items: center;
+  justify-content: center;
+
+  border: 1px solid #ddd;
+
+  border-radius: 10px;
+
+  background: #ffffff;
+
+  color: #555;
+
+  font-size: 22px;
+
+  cursor: pointer;
+}
+
+.upload-btn:hover {
+  background: #f5f5f5;
+
+  border-color: #bbb;
+}
+
+.upload-btn:disabled {
+  opacity: 0.5;
+
+  cursor: not-allowed;
+}
+
+
+/* =========================================================
+   TEXT INPUT
+========================================================= */
+
+.input-area input {
+  flex: 1 1 auto;
+
+  min-width: 0;
+
+  width: 100%;
+
+  height: 50px;
+
+  padding: 13px 16px;
+
+  border: 1px solid #ccc;
+
+  border-radius: 10px;
+
+  font-size: 16px;
+
+  outline: none;
+
+  box-sizing: border-box;
+}
+
+.input-area input:focus {
+  border-color: #2f80ed;
+}
+
+.input-area input:disabled {
+  background: #f5f5f5;
+
+  cursor: not-allowed;
+}
+
+
+/* =========================================================
+   SEND BUTTON
+========================================================= */
+
+.input-area button:last-child {
+  flex-shrink: 0;
+
+  height: 50px;
+
+  margin-left: 10px;
+
+  padding: 0 28px;
+
+  border: none;
+
+  border-radius: 10px;
+
+  background: #10a37f;
+
+  color: white;
+
+  cursor: pointer;
+
+  font-size: 15px;
+}
+
+.input-area button:last-child:hover {
+  background: #0d8f6f;
+}
+
+.input-area button:last-child:disabled {
+  background: #9ca3af;
+
+  cursor: not-allowed;
+}
+
+
+/* =========================================================
+   SCROLLBAR
+========================================================= */
+
+.messages::-webkit-scrollbar {
+  width: 7px;
+}
+
+.messages::-webkit-scrollbar-track {
+  background: #f5f5f5;
+}
+
+.messages::-webkit-scrollbar-thumb {
+  background: #c7c7c7;
+
+  border-radius: 10px;
+}
+
+.messages::-webkit-scrollbar-thumb:hover {
+  background: #999;
+}
+
+
+/* =========================================================
+   LARGE DESKTOP
+========================================================= */
+
+@media (min-width: 1200px) {
+
+  .messages {
+    padding-left: 40px;
+    padding-right: 40px;
+  }
+
+  .input-area {
+    padding-left: 40px;
+    padding-right: 40px;
+  }
+
+  .upload-preview {
+    width: calc(100% - 80px);
+
+    margin-left: 40px;
+    margin-right: 40px;
+  }
+
+  .upload-message {
+    padding-left: 40px;
+    padding-right: 40px;
+  }
+
+}
+
+
+/* =========================================================
+   TABLET
+========================================================= */
+
+@media (max-width: 900px) {
+
+  .messages {
+    padding: 20px;
+  }
+
+  .message {
+    max-width: 80%;
+  }
+
+  .input-area {
+    padding: 12px 20px;
+  }
+
+  .upload-preview {
+    width: calc(100% - 40px);
+
+    margin-left: 20px;
+    margin-right: 20px;
+  }
+
+  .upload-message {
+    padding-left: 20px;
+    padding-right: 20px;
+  }
+
+}
+
+
+/* =========================================================
+   MOBILE
+========================================================= */
+
+@media (max-width: 600px) {
+
+  .chat-container {
+    width: 100% !important;
+    height: 100% !important;
+
+    min-width: 0 !important;
+    min-height: 0 !important;
+  }
+
+  .messages {
+    padding: 15px;
+  }
+
+  .message {
+    max-width: 85%;
+
+    font-size: 14px;
+  }
+
+  .input-area {
+    width: 100%;
+
+    min-height: 64px;
+
+    padding: 10px;
+  }
+
+  .upload-btn {
+    width: 42px;
+    height: 42px;
+
+    margin-right: 6px;
+
+    font-size: 20px;
+  }
+
+  .input-area input {
+    height: 42px;
+
+    font-size: 14px;
+
+    padding: 10px;
+  }
+
+  .input-area button:last-child {
+    height: 42px;
+
+    margin-left: 6px;
+
+    padding: 0 15px;
+  }
+
+  .upload-preview {
+    width: calc(100% - 20px);
+
+    margin: 0 10px 8px 10px;
+  }
+
+  .upload-message {
+    padding-left: 10px;
+    padding-right: 10px;
+  }
+
+}
+
+
+/* =========================================================
+   VERY SMALL MOBILE
+========================================================= */
+
+@media (max-width: 420px) {
+
+  .upload-btn {
+    width: 40px;
+    height: 40px;
+  }
+
+  .input-area button:last-child {
+    padding: 0 12px;
+
+    font-size: 14px;
+  }
+
+  .message {
+    max-width: 90%;
+  }
+
+}

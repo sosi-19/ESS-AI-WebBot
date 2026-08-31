@@ -1,0 +1,624 @@
+/* =========================================================
+   FLOATING ESS AI BUTTON
+========================================================= */
+
+.ess-ai-launcher {
+
+  position: fixed;
+
+  right: 25px;
+  bottom: 25px;
+
+  z-index: 9999;
+
+  display: flex;
+  align-items: center;
+  justify-content: center;
+
+  gap: 9px;
+
+  padding: 13px 20px;
+
+  border: none;
+  border-radius: 30px;
+
+  background: #087f5b;
+  color: white;
+
+  font-size: 15px;
+  font-weight: 600;
+
+  cursor: pointer;
+
+  box-shadow:
+    0 6px 20px rgba(0, 0, 0, 0.22);
+
+  transition:
+    transform 0.2s ease,
+    box-shadow 0.2s ease;
+}
+
+
+.ess-ai-launcher:hover {
+
+  transform: translateY(-2px);
+
+  box-shadow:
+    0 9px 25px rgba(0, 0, 0, 0.28);
+}
+
+
+.ess-ai-icon {
+  font-size: 20px;
+}
+
+
+/* =========================================================
+   OVERLAY
+========================================================= */
+
+.ess-ai-overlay {
+
+  position: fixed;
+
+  inset: 0;
+
+  z-index: 10000;
+
+  display: flex;
+
+  align-items: center;
+  justify-content: center;
+
+  pointer-events: none;
+}
+
+
+/* =========================================================
+   BACKDROP
+========================================================= */
+
+.ess-ai-backdrop {
+
+  position: absolute;
+
+  inset: 0;
+
+  background: rgba(0, 0, 0, 0.35);
+
+  pointer-events: auto;
+}
+
+
+/* =========================================================
+   POPUP WINDOW
+========================================================= */
+
+.ess-ai-window {
+
+  position: relative;
+
+  z-index: 10001;
+
+  width: min(1200px, 94vw);
+
+  height: min(800px, 90vh);
+
+  background: white;
+
+  border-radius: 18px;
+
+  overflow: hidden;
+
+  display: flex;
+
+  flex-direction: column;
+
+  box-shadow:
+    0 20px 60px rgba(0, 0, 0, 0.30);
+
+  pointer-events: auto;
+}
+
+
+/* =========================================================
+   MAXIMIZED
+========================================================= */
+
+.ess-ai-window.is-maximized {
+
+  width: 96vw;
+
+  height: 94vh;
+
+  border-radius: 12px;
+}
+
+
+/* =========================================================
+   MINIMIZED
+========================================================= */
+
+.ess-ai-window.is-minimized {
+
+  height: 70px;
+
+  width: min(700px, 90vw);
+
+}
+
+
+/* =========================================================
+   POPUP HEADER
+========================================================= */
+
+.ess-ai-window-header {
+
+  min-height: 70px;
+
+  flex-shrink: 0;
+
+  display: flex;
+
+  align-items: center;
+
+  justify-content: space-between;
+
+  padding: 10px 18px;
+
+  background: white;
+
+  border-bottom: 1px solid #e5e7eb;
+
+  box-sizing: border-box;
+}
+
+
+/* =========================================================
+   TITLE
+========================================================= */
+
+.ess-ai-title {
+
+  display: flex;
+
+  align-items: center;
+
+  gap: 11px;
+
+  min-width: 0;
+}
+
+
+.ess-ai-title-icon {
+
+  font-size: 28px;
+
+  flex-shrink: 0;
+}
+
+
+.ess-ai-title-text {
+
+  display: flex;
+
+  flex-direction: column;
+
+  min-width: 0;
+}
+
+
+.ess-ai-title-text strong {
+
+  font-size: 18px;
+
+  font-weight: 700;
+
+  color: #173b32;
+}
+
+
+.ess-ai-title-text small {
+
+  margin-top: 2px;
+
+  font-size: 12px;
+
+  color: #777;
+}
+
+
+/* =========================================================
+   RIGHT ACTIONS
+========================================================= */
+
+.ess-ai-actions {
+
+  display: flex;
+
+  align-items: center;
+
+  justify-content: flex-end;
+
+  gap: 8px;
+
+  flex-shrink: 0;
+}
+
+
+/* =========================================================
+   AUTH BUTTONS
+========================================================= */
+
+.ess-ai-auth {
+
+  height: 40px;
+
+  padding: 0 14px;
+
+  border-radius: 8px;
+
+  font-size: 13px;
+
+  font-weight: 600;
+
+  cursor: pointer;
+
+  white-space: nowrap;
+
+  transition: 0.2s ease;
+}
+
+
+/* Guest */
+
+.ess-ai-auth.guest {
+
+  background: #f1f5f3;
+
+  color: #176b52;
+
+  border: 1px solid #d5e4df;
+}
+
+
+.ess-ai-auth.guest:hover {
+
+  background: #e5eee9;
+}
+
+
+/* Login */
+
+.ess-ai-auth.login {
+
+  background: white;
+
+  color: #176b52;
+
+  border: 1px solid #176b52;
+}
+
+
+.ess-ai-auth.login:hover {
+
+  background: #f0f8f5;
+}
+
+
+/* Register */
+
+.ess-ai-auth.register {
+
+  background: #087f5b;
+
+  color: white;
+
+  border: 1px solid #087f5b;
+}
+
+
+.ess-ai-auth.register:hover {
+
+  background: #066b4d;
+}
+
+
+/* =========================================================
+   MINIMIZE / MAXIMIZE
+========================================================= */
+
+.ess-ai-control {
+
+  width: 38px;
+
+  height: 38px;
+
+  border: none;
+
+  background: transparent;
+
+  color: #555;
+
+  border-radius: 7px;
+
+  font-size: 21px;
+
+  cursor: pointer;
+
+  display: flex;
+
+  align-items: center;
+
+  justify-content: center;
+}
+
+
+.ess-ai-control:hover {
+
+  background: #f1f1f1;
+
+  color: #222;
+}
+
+
+/* =========================================================
+   CLOSE
+========================================================= */
+
+.ess-ai-close {
+
+  width: 38px;
+
+  height: 38px;
+
+  border: none;
+
+  border-radius: 7px;
+
+  background: transparent;
+
+  color: #555;
+
+  font-size: 21px;
+
+  cursor: pointer;
+
+  display: flex;
+
+  align-items: center;
+
+  justify-content: center;
+}
+
+
+.ess-ai-close:hover {
+
+  background: #fee2e2;
+
+  color: #dc2626;
+}
+
+
+/* =========================================================
+   AIMODE CONTAINER
+========================================================= */
+
+.ess-ai-content {
+
+  flex: 1;
+
+  min-height: 0;
+
+  width: 100%;
+
+  overflow: hidden;
+
+  display: flex;
+}
+
+
+/* =========================================================
+   VERY IMPORTANT
+   FORCE EXISTING AIMODE TO FILL POPUP
+========================================================= */
+
+.ess-ai-content > * {
+
+  width: 100%;
+
+  height: 100%;
+
+  min-height: 0;
+
+}
+
+
+/* =========================================================
+   FORCE APP LAYOUT
+========================================================= */
+
+.ess-ai-content .app-layout {
+
+  width: 100%;
+
+  height: 100%;
+
+  min-height: 0;
+
+  display: flex;
+
+  overflow: hidden;
+}
+
+
+/* =========================================================
+   SIDEBAR
+========================================================= */
+
+.ess-ai-content .sidebar {
+
+  flex-shrink: 0;
+
+  height: 100%;
+
+  overflow-y: auto;
+}
+
+
+/* =========================================================
+   MAIN CHAT
+========================================================= */
+
+.ess-ai-content .main {
+
+  flex: 1;
+
+  min-width: 0;
+
+  min-height: 0;
+
+  height: 100%;
+
+  overflow: hidden;
+
+  display: flex;
+
+  flex-direction: column;
+}
+
+
+/* =========================================================
+   CHATBOX
+========================================================= */
+
+.ess-ai-content .chat-container {
+
+  width: 100%;
+
+  height: 100%;
+
+  min-height: 0;
+
+  display: flex;
+
+  flex-direction: column;
+}
+
+
+/* =========================================================
+   MOBILE
+========================================================= */
+
+@media (max-width: 800px) {
+
+  .ess-ai-window {
+
+    width: 96vw;
+
+    height: 92vh;
+
+  }
+
+
+  .ess-ai-window-header {
+
+    padding: 8px 10px;
+
+  }
+
+
+  .ess-ai-actions {
+
+    gap: 3px;
+
+  }
+
+
+  .ess-ai-auth {
+
+    padding: 0 9px;
+
+    font-size: 11px;
+
+  }
+
+
+  .ess-ai-title-text small {
+
+    display: none;
+
+  }
+
+}
+
+
+/* =========================================================
+   SMALL MOBILE
+========================================================= */
+
+@media (max-width: 600px) {
+
+  .ess-ai-window {
+
+    width: 100vw;
+
+    height: 100vh;
+
+    border-radius: 0;
+
+  }
+
+
+  .ess-ai-window-header {
+
+    min-height: 62px;
+
+  }
+
+
+  .ess-ai-title-icon {
+
+    font-size: 23px;
+
+  }
+
+
+  .ess-ai-title-text strong {
+
+    font-size: 15px;
+
+  }
+
+
+  .ess-ai-auth {
+
+    padding: 0 7px;
+
+    height: 34px;
+
+  }
+
+
+  .ess-ai-control,
+  .ess-ai-close {
+
+    width: 32px;
+
+    height: 32px;
+
+  }
+
+
+  /* On very small screens keep sidebar visible
+     but make it narrower */
+
+  .ess-ai-content .sidebar {
+
+    width: 210px;
+
+    min-width: 210px;
+
+  }
+
+}

@@ -1,0 +1,218 @@
+/* =====================================================
+   RESET
+===================================================== */
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  font-family: Arial, Helvetica, sans-serif;
+  background: #f7f7f8;
+}
+
+
+/* =====================================================
+   APP
+===================================================== */
+
+.app {
+  width: 100%;
+  height: 100vh;
+
+  display: flex;
+
+  margin: 0;
+  padding: 0;
+
+  overflow: hidden;
+}
+
+
+/* =====================================================
+   APP LAYOUT
+===================================================== */
+
+.app-layout {
+  width: 100%;
+  height: 100vh;
+
+  display: flex;
+
+  margin: 0;
+  padding: 0;
+
+  overflow: hidden;
+}
+
+
+/* =====================================================
+   SIDEBAR
+===================================================== */
+
+.sidebar {
+  width: 280px;
+  min-width: 280px;
+  max-width: 280px;
+
+  height: 100vh;
+
+  flex-shrink: 0;
+
+  overflow-y: auto;
+}
+
+
+/* =====================================================
+   MAIN
+===================================================== */
+
+.main {
+  width: calc(100% - 280px);
+
+  flex: 1 1 auto;
+
+  min-width: 0;
+  min-height: 0;
+
+  height: 100vh;
+
+  display: flex;
+  flex-direction: column;
+
+  margin: 0;
+  padding: 0;
+
+  overflow: hidden;
+}
+
+
+/* =====================================================
+   CHATBOX
+===================================================== */
+
+.main .chat-container {
+  width: 100%;
+  height: 100%;
+
+  flex: 1 1 auto;
+
+  min-width: 0;
+  min-height: 0;
+
+  display: flex;
+  flex-direction: column;
+
+  margin: 0;
+  padding: 0;
+
+  overflow: hidden;
+
+  background: #ffffff;
+}
+
+
+/* =====================================================
+   CHAT HEADER
+===================================================== */
+
+.main .header {
+  width: 100%;
+
+  flex-shrink: 0;
+}
+
+
+/* =====================================================
+   MESSAGE AREA
+===================================================== */
+
+.main .messages {
+  width: 100%;
+
+  flex: 1 1 auto;
+
+  min-height: 0;
+  min-width: 0;
+
+  overflow-y: auto;
+}
+
+
+/* =====================================================
+   INPUT AREA
+===================================================== */
+
+.main .input-area {
+  width: 100%;
+
+  flex-shrink: 0;
+
+  margin-top: auto;
+}
+
+
+/* =====================================================
+   TABLET
+===================================================== */
+
+@media (max-width: 900px) {
+
+  .sidebar {
+    width: 240px;
+    min-width: 240px;
+    max-width: 240px;
+  }
+
+  .main {
+    width: calc(100% - 240px);
+  }
+
+}
+
+
+/* =====================================================
+   MOBILE
+===================================================== */
+
+@media (max-width: 600px) {
+
+  .sidebar {
+    width: 200px;
+    min-width: 200px;
+    max-width: 200px;
+  }
+
+  .main {
+    width: calc(100% - 200px);
+  }
+
+}
+
+
+/* =====================================================
+   SMALL MOBILE
+===================================================== */
+
+@media (max-width: 450px) {
+
+  .sidebar {
+    width: 180px;
+    min-width: 180px;
+    max-width: 180px;
+  }
+
+  .main {
+    width: calc(100% - 180px);
+  }
+
+}

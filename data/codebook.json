@@ -1,0 +1,16 @@
+{
+    "pw_w5": {
+        "description": "Sampling weight used in the survey.",
+        "type": "Float"
+    },
+
+    "s2q16a": {
+        "description": "Monthly income amount.",
+        "type": "Numeric"
+    },
+
+    "s2q01": {
+        "description": "Sex of respondent.",
+        "type": "Categorical"
+    }
+}
