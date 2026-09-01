@@ -51,7 +51,6 @@ function ChatBox({ messages, setMessages, loadHistory }) {
       return;
     }
 
-
     // -------------------------------------------------
     // Only PDF files
     // -------------------------------------------------
@@ -71,14 +70,13 @@ function ChatBox({ messages, setMessages, loadHistory }) {
       return;
     }
 
-
     // -------------------------------------------------
     // Save selected file
     // -------------------------------------------------
 
     setSelectedFile(file);
 
-    // New file must be uploaded first.
+    // New file has not been uploaded yet.
     setFileId(null);
 
     setUploadMessage("");
@@ -106,21 +104,17 @@ function ChatBox({ messages, setMessages, loadHistory }) {
       return;
     }
 
-
     if (uploading) {
       return;
     }
 
-
     setUploading(true);
     setUploadMessage("");
-
 
     try {
 
       const token =
         localStorage.getItem("token");
-
 
       // -------------------------------------------------
       // Create FormData
@@ -132,7 +126,6 @@ function ChatBox({ messages, setMessages, loadHistory }) {
         "file",
         selectedFile
       );
-
 
       console.log(
         "================================================"
@@ -208,8 +201,19 @@ function ChatBox({ messages, setMessages, loadHistory }) {
 
           if (errorData.detail) {
 
-            errorMessage =
-              errorData.detail;
+            if (typeof errorData.detail === "string") {
+
+              errorMessage =
+                errorData.detail;
+
+            } else {
+
+              errorMessage =
+                JSON.stringify(
+                  errorData.detail
+                );
+
+            }
 
           }
 
@@ -230,7 +234,6 @@ function ChatBox({ messages, setMessages, loadHistory }) {
 
       const data =
         await response.json();
-
 
       console.log(
         "📤 Upload response:",
@@ -300,9 +303,7 @@ function ChatBox({ messages, setMessages, loadHistory }) {
         error
       );
 
-
       setFileId(null);
-
 
       setUploadMessage(
         `❌ ${
@@ -310,7 +311,6 @@ function ChatBox({ messages, setMessages, loadHistory }) {
           "File upload failed. Please try again."
         }`
       );
-
 
     } finally {
 
@@ -327,10 +327,17 @@ function ChatBox({ messages, setMessages, loadHistory }) {
 
   async function sendMessage() {
 
+    // -------------------------------------------------
+    // Empty message
+    // -------------------------------------------------
+
     if (!input.trim()) {
       return;
     }
 
+    // -------------------------------------------------
+    // Prevent duplicate requests
+    // -------------------------------------------------
 
     if (loading) {
       return;
@@ -338,7 +345,7 @@ function ChatBox({ messages, setMessages, loadHistory }) {
 
 
     // -------------------------------------------------
-    // If a PDF is selected but not uploaded
+    // Selected PDF must be uploaded first
     // -------------------------------------------------
 
     if (selectedFile && !fileId) {
@@ -357,7 +364,8 @@ function ChatBox({ messages, setMessages, loadHistory }) {
 
 
     // -------------------------------------------------
-    // Save file ID before anything changes
+    // IMPORTANT:
+    // Save current file ID before state changes
     // -------------------------------------------------
 
     const currentFileId =
@@ -365,31 +373,11 @@ function ChatBox({ messages, setMessages, loadHistory }) {
 
 
     // -------------------------------------------------
-    // Get authentication token
+    // Authentication
     // -------------------------------------------------
 
     const token =
       localStorage.getItem("token");
-
-
-    // =================================================
-    // IMPORTANT
-    // =================================================
-    //
-    // Logged-in user:
-    //
-    //     /chat/stream
-    //
-    // Guest:
-    //
-    //     /chat/public/stream
-    //
-    // =================================================
-
-    const chatEndpoint =
-      token
-        ? `${API_BASE_URL}/chat/stream`
-        : `${API_BASE_URL}/chat/public/stream`;
 
 
     const isAuthenticated =
@@ -397,8 +385,18 @@ function ChatBox({ messages, setMessages, loadHistory }) {
 
 
     // -------------------------------------------------
-    // Debug
+    // Choose endpoint
     // -------------------------------------------------
+
+    const chatEndpoint =
+      isAuthenticated
+        ? `${API_BASE_URL}/chat/stream`
+        : `${API_BASE_URL}/chat/public/stream`;
+
+
+    // =================================================
+    // DEBUG
+    // =================================================
 
     console.log(
       "================================================"
@@ -415,8 +413,7 @@ function ChatBox({ messages, setMessages, loadHistory }) {
 
     console.log(
       "📎 Selected file:",
-      selectedFile?.name ||
-        "None"
+      selectedFile?.name || "None"
     );
 
     console.log(
@@ -455,16 +452,20 @@ function ChatBox({ messages, setMessages, loadHistory }) {
     ]);
 
 
+    // -------------------------------------------------
+    // Clear input
+    // -------------------------------------------------
+
     setInput("");
+
     setLoading(true);
 
 
     try {
 
-
-      // -------------------------------------------------
-      // Request body
-      // -------------------------------------------------
+      // =================================================
+      // REQUEST BODY
+      // =================================================
 
       const requestBody = {
 
@@ -472,7 +473,7 @@ function ChatBox({ messages, setMessages, loadHistory }) {
           userText,
 
         file_id:
-          currentFileId,
+          currentFileId || null,
 
       };
 
@@ -483,9 +484,9 @@ function ChatBox({ messages, setMessages, loadHistory }) {
       );
 
 
-      // -------------------------------------------------
-      // Streaming request
-      // -------------------------------------------------
+      // =================================================
+      // SEND REQUEST
+      // =================================================
 
       const response = await fetch(
 
@@ -499,9 +500,6 @@ function ChatBox({ messages, setMessages, loadHistory }) {
 
             "Content-Type":
               "application/json",
-
-            // Only send Authorization
-            // when the user is logged in.
 
             ...(token
               ? {
@@ -521,9 +519,9 @@ function ChatBox({ messages, setMessages, loadHistory }) {
       );
 
 
-      // -------------------------------------------------
-      // HTTP error
-      // -------------------------------------------------
+      // =================================================
+      // HTTP ERROR
+      // =================================================
 
       if (!response.ok) {
 
@@ -536,10 +534,25 @@ function ChatBox({ messages, setMessages, loadHistory }) {
           const errorData =
             await response.json();
 
+
           if (errorData.detail) {
 
-            errorMessage =
-              errorData.detail;
+            if (
+              typeof errorData.detail ===
+              "string"
+            ) {
+
+              errorMessage =
+                errorData.detail;
+
+            } else {
+
+              errorMessage =
+                JSON.stringify(
+                  errorData.detail
+                );
+
+            }
 
           }
 
@@ -549,7 +562,7 @@ function ChatBox({ messages, setMessages, loadHistory }) {
 
 
         // -------------------------------------------------
-        // Token may have expired
+        // Authentication error
         // -------------------------------------------------
 
         if (
@@ -571,9 +584,9 @@ function ChatBox({ messages, setMessages, loadHistory }) {
       }
 
 
-      // -------------------------------------------------
-      // Make sure streaming exists
-      // -------------------------------------------------
+      // =================================================
+      // STREAMING CHECK
+      // =================================================
 
       if (!response.body) {
 
@@ -584,9 +597,9 @@ function ChatBox({ messages, setMessages, loadHistory }) {
       }
 
 
-      // -------------------------------------------------
-      // Create empty bot message
-      // -------------------------------------------------
+      // =================================================
+      // CREATE BOT MESSAGE
+      // =================================================
 
       setMessages((prev) => [
 
@@ -601,29 +614,28 @@ function ChatBox({ messages, setMessages, loadHistory }) {
       ]);
 
 
-      // -------------------------------------------------
-      // Stream reader
-      // -------------------------------------------------
+      // =================================================
+      // STREAM READER
+      // =================================================
 
       const reader =
         response.body.getReader();
 
 
       const decoder =
-        new TextDecoder();
+        new TextDecoder("utf-8");
 
 
       let buffer = "";
       let fullAnswer = "";
+      let streamFinished = false;
 
 
       // =================================================
       // UPDATE BOT MESSAGE
       // =================================================
 
-      function updateBotMessage(
-        answer
-      ) {
+      function updateBotMessage(answer) {
 
         setMessages((prev) => {
 
@@ -639,6 +651,25 @@ function ChatBox({ messages, setMessages, loadHistory }) {
 
           const lastIndex =
             updated.length - 1;
+
+
+          // Make sure we update the bot message,
+          // not the user's message.
+
+          if (
+            updated[lastIndex].role !==
+            "bot"
+          ) {
+
+            updated.push({
+              role: "bot",
+              text: answer,
+              sources: [],
+            });
+
+            return updated;
+
+          }
 
 
           updated[lastIndex] = {
@@ -662,9 +693,7 @@ function ChatBox({ messages, setMessages, loadHistory }) {
       // UPDATE BOT SOURCES
       // =================================================
 
-      function updateBotSources(
-        sources
-      ) {
+      function updateBotSources(sources) {
 
         setMessages((prev) => {
 
@@ -680,6 +709,16 @@ function ChatBox({ messages, setMessages, loadHistory }) {
 
           const lastIndex =
             updated.length - 1;
+
+
+          if (
+            updated[lastIndex].role !==
+            "bot"
+          ) {
+
+            return updated;
+
+          }
 
 
           updated[lastIndex] = {
@@ -700,12 +739,16 @@ function ChatBox({ messages, setMessages, loadHistory }) {
 
 
       // =================================================
-      // PROCESS ONE JSON LINE
+      // PROCESS ONE NDJSON LINE
       // =================================================
 
       function processLine(line) {
 
-        if (!line.trim()) {
+        const cleanLine =
+          line.trim();
+
+
+        if (!cleanLine) {
           return;
         }
 
@@ -713,7 +756,7 @@ function ChatBox({ messages, setMessages, loadHistory }) {
         try {
 
           const data =
-            JSON.parse(line);
+            JSON.parse(cleanLine);
 
 
           console.log(
@@ -722,9 +765,9 @@ function ChatBox({ messages, setMessages, loadHistory }) {
           );
 
 
-          // ------------------------------------------------
-          // Normal streaming response
-          // ------------------------------------------------
+          // =================================================
+          // STREAMED RESPONSE TEXT
+          // =================================================
 
           if (
             typeof data.response ===
@@ -739,15 +782,20 @@ function ChatBox({ messages, setMessages, loadHistory }) {
               fullAnswer
             );
 
+
+            console.log(
+              "📝 Current answer:",
+              fullAnswer
+            );
+
           }
 
 
-          // ------------------------------------------------
-          // Sources
-          // ------------------------------------------------
+          // =================================================
+          // SOURCES
+          // =================================================
 
           if (
-            data.sources &&
             Array.isArray(
               data.sources
             )
@@ -760,9 +808,9 @@ function ChatBox({ messages, setMessages, loadHistory }) {
           }
 
 
-          // ------------------------------------------------
-          // Backend error
-          // ------------------------------------------------
+          // =================================================
+          // BACKEND ERROR
+          // =================================================
 
           if (data.error) {
 
@@ -772,7 +820,7 @@ function ChatBox({ messages, setMessages, loadHistory }) {
             );
 
 
-            if (!fullAnswer) {
+            if (!fullAnswer.trim()) {
 
               fullAnswer =
                 `❌ ${data.error}`;
@@ -792,24 +840,49 @@ function ChatBox({ messages, setMessages, loadHistory }) {
           }
 
 
-          // ------------------------------------------------
-          // Stream finished
-          // ------------------------------------------------
+          // =================================================
+          // STREAM FINISHED
+          // =================================================
 
-          if (data.done) {
+          if (data.done === true) {
+
+            streamFinished = true;
+
 
             console.log(
-              "🌊 Stream finished"
+              "================================================"
+            );
+
+            console.log(
+              "🌊 STREAM FINISHED"
+            );
+
+            console.log(
+              "Final answer:",
+              fullAnswer
+            );
+
+            console.log(
+              "Answer length:",
+              fullAnswer.length
+            );
+
+            console.log(
+              "================================================"
             );
 
           }
-
 
         } catch (error) {
 
           console.warn(
             "⚠️ Could not parse streaming line:",
-            line
+            cleanLine
+          );
+
+          console.warn(
+            "Parser error:",
+            error
           );
 
         }
@@ -829,10 +902,18 @@ function ChatBox({ messages, setMessages, loadHistory }) {
         } = await reader.read();
 
 
+        // -------------------------------------------------
+        // Stream connection closed
+        // -------------------------------------------------
+
         if (done) {
           break;
         }
 
+
+        // -------------------------------------------------
+        // Decode bytes
+        // -------------------------------------------------
 
         buffer +=
           decoder.decode(
@@ -843,15 +924,25 @@ function ChatBox({ messages, setMessages, loadHistory }) {
           );
 
 
+        // -------------------------------------------------
+        // Split NDJSON lines
+        // -------------------------------------------------
+
         const lines =
           buffer.split("\n");
 
 
+        // -------------------------------------------------
         // Keep incomplete line
+        // -------------------------------------------------
 
         buffer =
           lines.pop() || "";
 
+
+        // -------------------------------------------------
+        // Process complete lines
+        // -------------------------------------------------
 
         for (
           const line of lines
@@ -873,7 +964,7 @@ function ChatBox({ messages, setMessages, loadHistory }) {
 
 
       // =================================================
-      // PROCESS REMAINING BUFFER
+      // PROCESS LAST LINE
       // =================================================
 
       if (buffer.trim()) {
@@ -886,7 +977,24 @@ function ChatBox({ messages, setMessages, loadHistory }) {
 
 
       // =================================================
-      // STREAM COMPLETE
+      // EMPTY RESPONSE FALLBACK
+      // =================================================
+
+      if (!fullAnswer.trim()) {
+
+        fullAnswer =
+          "The AI did not return a response.";
+
+
+        updateBotMessage(
+          fullAnswer
+        );
+
+      }
+
+
+      // =================================================
+      // FINAL DEBUG
       // =================================================
 
       console.log(
@@ -898,8 +1006,23 @@ function ChatBox({ messages, setMessages, loadHistory }) {
       );
 
       console.log(
+        "Answer:",
+        fullAnswer
+      );
+
+      console.log(
         "Total answer characters:",
         fullAnswer.length
+      );
+
+      console.log(
+        "Stream finished:",
+        streamFinished
+      );
+
+      console.log(
+        "File ID:",
+        currentFileId
       );
 
       console.log(
@@ -912,9 +1035,15 @@ function ChatBox({ messages, setMessages, loadHistory }) {
       );
 
 
-      // -------------------------------------------------
-      // Reload history ONLY for logged-in users
-      // -------------------------------------------------
+      // =================================================
+      // RELOAD HISTORY
+      // =================================================
+      //
+      // Only authenticated users have saved history.
+      //
+      // Guest users do NOT reload history.
+      //
+      // =================================================
 
       if (
         isAuthenticated &&
@@ -955,9 +1084,9 @@ function ChatBox({ messages, setMessages, loadHistory }) {
       );
 
 
-      // -------------------------------------------------
-      // Put error into existing bot message
-      // -------------------------------------------------
+      // =================================================
+      // SHOW ERROR IN BOT MESSAGE
+      // =================================================
 
       setMessages((prev) => {
 
@@ -970,9 +1099,21 @@ function ChatBox({ messages, setMessages, loadHistory }) {
           updated.length - 1;
 
 
+        const errorText =
+          `❌ ${
+            error.message ||
+            "Sorry, something went wrong. Please try again."
+          }`;
+
+
+        // -------------------------------------------------
+        // Existing bot message
+        // -------------------------------------------------
+
         if (
           lastIndex >= 0 &&
-          updated[lastIndex].role === "bot"
+          updated[lastIndex].role ===
+            "bot"
         ) {
 
           updated[lastIndex] = {
@@ -980,10 +1121,7 @@ function ChatBox({ messages, setMessages, loadHistory }) {
             ...updated[lastIndex],
 
             text:
-              `❌ ${
-                error.message ||
-                "Sorry, something went wrong. Please try again."
-              }`,
+              errorText,
 
           };
 
@@ -994,7 +1132,7 @@ function ChatBox({ messages, setMessages, loadHistory }) {
 
 
         // -------------------------------------------------
-        // If no bot message exists
+        // No bot message
         // -------------------------------------------------
 
         updated.push({
@@ -1002,10 +1140,7 @@ function ChatBox({ messages, setMessages, loadHistory }) {
           role: "bot",
 
           text:
-            `❌ ${
-              error.message ||
-              "Sorry, something went wrong. Please try again."
-            }`,
+            errorText,
 
           sources: [],
 
@@ -1015,7 +1150,6 @@ function ChatBox({ messages, setMessages, loadHistory }) {
         return updated;
 
       });
-
 
     } finally {
 
@@ -1038,7 +1172,9 @@ function ChatBox({ messages, setMessages, loadHistory }) {
 
 
     setSelectedFile(null);
+
     setFileId(null);
+
     setUploadMessage("");
 
 
@@ -1061,7 +1197,6 @@ function ChatBox({ messages, setMessages, loadHistory }) {
   return (
 
     <div className="chat-container">
-
 
       <Header />
 
@@ -1086,14 +1221,14 @@ function ChatBox({ messages, setMessages, loadHistory }) {
         )}
 
 
+        {/* ----------------------------------------- */}
+        {/* THINKING INDICATOR */}
+        {/* ----------------------------------------- */}
+
         {loading && (
-
           <div className="message bot">
-
             ⏳ Thinking...
-
           </div>
-
         )}
 
 
@@ -1112,7 +1247,6 @@ function ChatBox({ messages, setMessages, loadHistory }) {
 
         <div className="upload-preview">
 
-
           <span>
 
             📄{" "}
@@ -1123,7 +1257,7 @@ function ChatBox({ messages, setMessages, loadHistory }) {
 
 
           {/* ----------------------------------- */}
-          {/* File selected but not uploaded */}
+          {/* FILE NOT UPLOADED */}
           {/* ----------------------------------- */}
 
           {!fileId &&
@@ -1144,7 +1278,7 @@ function ChatBox({ messages, setMessages, loadHistory }) {
 
 
           {/* ----------------------------------- */}
-          {/* Uploading */}
+          {/* UPLOADING */}
           {/* ----------------------------------- */}
 
           {uploading && (
@@ -1159,7 +1293,7 @@ function ChatBox({ messages, setMessages, loadHistory }) {
 
 
           {/* ----------------------------------- */}
-          {/* Successfully uploaded */}
+          {/* UPLOADED */}
           {/* ----------------------------------- */}
 
           {fileId && (
@@ -1216,36 +1350,47 @@ function ChatBox({ messages, setMessages, loadHistory }) {
 
 
         {/* --------------------------------------- */}
-        {/* Hidden PDF input */}
+        {/* HIDDEN FILE INPUT */}
         {/* --------------------------------------- */}
 
         <input
+
           ref={fileInputRef}
+
           type="file"
+
           accept=".pdf,application/pdf"
+
           onChange={
             handleFileSelect
           }
+
           style={{
             display: "none",
           }}
+
         />
 
 
         {/* --------------------------------------- */}
-        {/* Upload button */}
+        {/* UPLOAD BUTTON */}
         {/* --------------------------------------- */}
 
         <button
+
           type="button"
+
           className="upload-btn"
+
           onClick={() =>
             fileInputRef.current?.click()
           }
+
           disabled={
             loading ||
             uploading
           }
+
         >
 
           📎
@@ -1254,18 +1399,23 @@ function ChatBox({ messages, setMessages, loadHistory }) {
 
 
         {/* --------------------------------------- */}
-        {/* Text input */}
+        {/* TEXT INPUT */}
         {/* --------------------------------------- */}
 
         <input
+
           value={input}
+
           onChange={(e) =>
             setInput(
               e.target.value
             )
           }
+
           placeholder="💬 Ask ESS AI Assistant..."
+
           disabled={loading}
+
           onKeyDown={(e) => {
 
             if (
@@ -1280,23 +1430,28 @@ function ChatBox({ messages, setMessages, loadHistory }) {
             }
 
           }}
+
         />
 
 
         {/* --------------------------------------- */}
-        {/* Send button */}
+        {/* SEND BUTTON */}
         {/* --------------------------------------- */}
 
         <button
+
           type="button"
+
           onClick={
             sendMessage
           }
+
           disabled={
             loading ||
             uploading ||
             !input.trim()
           }
+
         >
 
           {loading

@@ -1,3 +1,4 @@
+
 import os
 import time
 import requests
@@ -9,13 +10,16 @@ from app.services.csv_ai_service import csv_ai_service
 # ============================================================
 # OLLAMA CONFIGURATION
 # ============================================================
+
 OLLAMA_URL = os.getenv(
     "OLLAMA_URL",
     "http://localhost:11434/api/generate"
 )
 
-MODEL = os.getenv("OLLAMA_MODEL", "qwen2.5:1.5b")
-
+MODEL = os.getenv(
+    "OLLAMA_MODEL",
+    "qwen2.5:1.5b"
+)
 
 
 # ============================================================
@@ -40,6 +44,12 @@ CACHE_MAX_SIZE = 100
 # ============================================================
 
 def normalize_question(message: str) -> str:
+    """
+    Normalize a user question for comparison/cache purposes.
+    """
+
+    if not message:
+        return ""
 
     return " ".join(
         message.lower().strip().split()
@@ -54,11 +64,15 @@ def make_cache_key(
     message: str,
     file_id: str | None = None
 ):
+    """
+    Create a cache key.
+
+    Uploaded PDF questions are isolated by file_id.
+    """
 
     question = normalize_question(message)
 
     if file_id:
-
         return f"FILE:{file_id}::{question}"
 
     return f"ESS::{question}"
@@ -83,6 +97,7 @@ def get_cached_response(
     if cached is None:
         return None
 
+    # Check expiration
     if (
         time.time()
         - cached["timestamp"]
@@ -115,6 +130,7 @@ def save_cached_response(
         file_id
     )
 
+    # Remove oldest item if cache is full
     if len(AI_CACHE) >= CACHE_MAX_SIZE:
 
         oldest_key = next(
@@ -140,7 +156,9 @@ def save_cached_response(
 
 def is_greeting(question: str):
 
-    question = normalize_question(question)
+    question = normalize_question(
+        question
+    )
 
     greetings = {
 
@@ -162,6 +180,7 @@ def is_greeting(question: str):
         "ሀይ",
         "ሃይ",
         "ሂ"
+
     }
 
     return question in greetings
@@ -194,7 +213,9 @@ def greeting_response():
 
 def detect_source(question: str):
 
-    question = normalize_question(question)
+    question = normalize_question(
+        question
+    )
 
     # --------------------------------------------------------
     # CSV DATASET SIGNALS
@@ -233,6 +254,7 @@ def detect_source(question: str):
         "min",
         "median",
         "unique",
+
         "standard deviation",
         "variance",
         "quartile",
@@ -249,10 +271,13 @@ def detect_source(question: str):
 
         "report",
         "reports",
+
         "survey",
         "surveys",
+
         "document",
         "documents",
+
         "pdf",
 
         "according to",
@@ -275,27 +300,18 @@ def detect_source(question: str):
     ]
 
     has_csv_dataset_signal = any(
-
         keyword in question
-
         for keyword in csv_dataset_keywords
-
     )
 
     has_csv_operation_signal = any(
-
         keyword in question
-
         for keyword in csv_operation_keywords
-
     )
 
     has_pdf_signal = any(
-
         keyword in question
-
         for keyword in pdf_keywords
-
     )
 
     csv_dataset_names = [
@@ -308,11 +324,8 @@ def detect_source(question: str):
     ]
 
     has_csv_dataset_name = any(
-
         dataset in question
-
         for dataset in csv_dataset_names
-
     )
 
     return {
@@ -365,7 +378,7 @@ def build_pdf_context(results):
             ""
         )
 
-        if not text.strip():
+        if not text or not text.strip():
             continue
 
         context_parts.append(
@@ -395,12 +408,16 @@ def build_pdf_sources(results):
 
     for item in results:
 
-        document = item.get("document")
+        document = item.get(
+            "document"
+        )
 
         if not document:
             continue
 
-        page = item.get("page")
+        page = item.get(
+            "page"
+        )
 
         source_key = (
             document,
@@ -432,9 +449,13 @@ def build_pdf_sources(results):
                 "file_id"
             )
 
-        sources.append(source)
+        sources.append(
+            source
+        )
 
-        seen.add(source_key)
+        seen.add(
+            source_key
+        )
 
     return sources
 
@@ -452,8 +473,8 @@ def build_pdf_prompt(
     if uploaded:
 
         source_description = (
-            "The context below comes ONLY from the "
-            "PDF uploaded by the user."
+            "The evidence below comes ONLY from "
+            "the PDF uploaded by the user."
         )
 
         missing_message = (
@@ -463,21 +484,22 @@ def build_pdf_prompt(
     else:
 
         source_description = (
-            "The context below comes from ESS PDF documents."
+            "The evidence below comes from "
+            "ESS PDF documents."
         )
 
         missing_message = (
-            "The information was not found in the "
-            "provided ESS documents."
+            "The information was not found in "
+            "the provided ESS documents."
         )
 
     return f"""
-You are an Ethiopia Statistical Service (ESS) AI assistant.
+You are the Ethiopia Statistical Service (ESS) AI Assistant.
 
 {source_description}
 
 Your task is to answer the user's question using ONLY
-the provided PDF evidence.
+the PDF evidence provided below.
 
 IMPORTANT RULES:
 
@@ -485,39 +507,40 @@ IMPORTANT RULES:
 2. Never invent numbers, percentages, dates, names,
    locations, or statistics.
 3. Never guess missing information.
-4. If the user asks for a summary, summarize the
-   important findings across ALL useful evidence.
-5. For summaries, identify the main topic of the report.
-6. For summaries, include important:
-   - indicators
-   - trends
-   - increases
-   - decreases
-   - comparisons
-   - major findings
-   - important figures
-7. Do not focus on only one table or one number.
-8. If multiple pages contain related information,
-   combine them into a coherent summary.
+4. If the user asks for a specific value, return the
+   exact value found in the evidence.
+5. If the user asks for a summary, summarize the important
+   findings across the useful evidence.
+6. For summaries, include important indicators, trends,
+   increases, decreases, comparisons, and major findings.
+7. Do not focus on only one table when several pieces of
+   evidence are relevant.
+8. Combine related evidence from multiple pages when useful.
 9. Preserve the exact year and month.
-10. Pay attention to Ethiopian Fiscal Year (EFY).
-11. Do not mix values from different periods incorrectly.
-12. If the question asks for a specific value,
-    provide the exact value from the evidence.
+10. Pay special attention to Ethiopian Fiscal Year (EFY).
+11. Do not mix values from different periods.
+12. If a value is explicitly stated in the evidence,
+    use that exact value.
 13. If useful, mention the page number.
 14. Do not describe the retrieval process.
-15. Do not mention embeddings, chunks, vector databases,
-    RAG, or Ollama.
+15. Do not mention RAG, embeddings, chunks, Chroma,
+    vector databases, or Ollama.
 16. Keep the answer clear and professional.
-17. If the requested information is not present,
-    say exactly:
+17. If the requested information is not present, say:
 
 "{missing_message}"
 
 18. For a summary, do not return the missing-information
-    message simply because one specific detail is absent.
-    Summarize the information that IS available.
+    message simply because one small detail is absent.
 19. Do not create information to make the answer longer.
+20. If the evidence contains a table, carefully read the
+    table before answering.
+21. If several values appear, select the value that directly
+    matches the user's requested indicator and period.
+22. Never substitute a nearby month, year, or different
+    inflation measure.
+23. If the question asks "What was Ethiopia's inflation
+    rate", clearly state the inflation rate and period.
 
 ============================================================
 PDF EVIDENCE
@@ -639,7 +662,6 @@ def ask_ollama(prompt: str):
 
             "temperature": 0.0,
 
-            # Increased for summaries
             "num_predict": 300,
 
             "num_ctx": 4096,
@@ -655,14 +677,6 @@ def ask_ollama(prompt: str):
     print(
         "\nPROMPT CHARACTERS:",
         len(prompt)
-    )
-
-    print(
-        "PROMPT PREVIEW:"
-    )
-
-    print(
-        prompt[:500]
     )
 
     try:
@@ -742,33 +756,6 @@ def ask_ollama(prompt: str):
     )
 
     print(
-        "Ollama load duration:",
-        data.get(
-            "load_duration",
-            0
-        ) / 1_000_000_000,
-        "seconds"
-    )
-
-    print(
-        "Ollama prompt eval:",
-        data.get(
-            "prompt_eval_duration",
-            0
-        ) / 1_000_000_000,
-        "seconds"
-    )
-
-    print(
-        "Ollama generation duration:",
-        data.get(
-            "eval_duration",
-            0
-        ) / 1_000_000_000,
-        "seconds"
-    )
-
-    print(
         "Ollama prompt tokens:",
         data.get(
             "prompt_eval_count",
@@ -812,7 +799,6 @@ def stream_ollama(prompt: str):
 
             "temperature": 0.0,
 
-            # Increased for summary generation
             "num_predict": 300,
 
             "num_ctx": 4096,
@@ -875,16 +861,29 @@ def stream_ollama(prompt: str):
 
         return
 
-    for line in response.iter_lines():
+    try:
 
-        if not line:
-            continue
+        for line in response.iter_lines(
+            decode_unicode=True
+        ):
 
-        data = line.decode(
-            "utf-8"
-        )
+            if not line:
+                continue
 
-        yield data
+            # IMPORTANT:
+            # Ollama returns one JSON object per line.
+            #
+            # We return the complete JSON line to the
+            # FastAPI streaming endpoint.
+            #
+            # The frontend should parse the Ollama JSON
+            # and use the "response" field.
+
+            yield line
+
+    finally:
+
+        response.close()
 
 
 # ============================================================
@@ -926,19 +925,6 @@ def _ask_ai_uncached(
 
     # ========================================================
     # 1. GREETING
-    # ========================================================
-    #
-    # VERY IMPORTANT:
-    #
-    # This MUST happen BEFORE:
-    #
-    # - source detection
-    # - CSV
-    # - PDF
-    # - retriever.search()
-    #
-    # Therefore "hello" NEVER searches the documents.
-    #
     # ========================================================
 
     if is_greeting(question):
@@ -997,6 +983,14 @@ def _ask_ai_uncached(
     # 3. UPLOADED FILE MODE
     # ========================================================
 
+    # IMPORTANT:
+    #
+    # file_id ALWAYS takes priority.
+    #
+    # Even if the question does not contain the word
+    # "report" or "PDF", the presence of file_id means
+    # the user is asking against the uploaded PDF.
+
     if file_id:
 
         print(
@@ -1010,13 +1004,35 @@ def _ask_ai_uncached(
 
         pdf_start = time.time()
 
-        results = retriever.search(
+        try:
 
-            message,
+            results = retriever.search(
 
-            file_id=file_id
+                message,
 
-        )
+                file_id=file_id
+
+            )
+
+        except Exception as e:
+
+            print(
+                "❌ Uploaded PDF retrieval error:",
+                e
+            )
+
+            return {
+
+                "answer":
+                    "There was an error reading "
+                    "the uploaded PDF.",
+
+                "sources": [],
+
+                "type":
+                    "pdf"
+
+            }
 
         pdf_time = (
             time.time()
@@ -1030,6 +1046,11 @@ def _ask_ai_uncached(
                 2
             ),
             "seconds"
+        )
+
+        print(
+            "📄 Retrieved chunks:",
+            len(results)
         )
 
         if not results:
@@ -1053,16 +1074,22 @@ def _ask_ai_uncached(
             }
 
         # ----------------------------------------------------
+        # Keep strongest results
+        # ----------------------------------------------------
+
+        top_results = results[:6]
+
+        print(
+            "📄 Chunks sent to Ollama:",
+            len(top_results)
+        )
+
+        # ----------------------------------------------------
         # Build context
         # ----------------------------------------------------
 
         context = build_pdf_context(
-            results
-        )
-
-        print(
-            "Chunks sent:",
-            len(results)
+            top_results
         )
 
         print(
@@ -1071,6 +1098,10 @@ def _ask_ai_uncached(
         )
 
         if not context.strip():
+
+            print(
+                "❌ Uploaded PDF context is empty"
+            )
 
             return {
 
@@ -1087,7 +1118,7 @@ def _ask_ai_uncached(
             }
 
         # ----------------------------------------------------
-        # Prompt
+        # Build prompt
         # ----------------------------------------------------
 
         prompt = build_pdf_prompt(
@@ -1106,7 +1137,7 @@ def _ask_ai_uncached(
         )
 
         # ----------------------------------------------------
-        # Ollama
+        # Ask Ollama
         # ----------------------------------------------------
 
         ollama_start = time.time()
@@ -1125,8 +1156,12 @@ def _ask_ai_uncached(
             "seconds"
         )
 
+        # ----------------------------------------------------
+        # Sources
+        # ----------------------------------------------------
+
         sources = build_pdf_sources(
-            results
+            top_results
         )
 
         total_time = (
@@ -1169,6 +1204,10 @@ def _ask_ai_uncached(
             "\n🔀 HYBRID QUESTION DETECTED"
         )
 
+        # ----------------------------------------------------
+        # CSV
+        # ----------------------------------------------------
+
         csv_start = time.time()
 
         csv_result = (
@@ -1198,6 +1237,10 @@ def _ask_ai_uncached(
             "No relevant CSV result was found."
 
         )
+
+        # ----------------------------------------------------
+        # PDF
+        # ----------------------------------------------------
 
         pdf_start = time.time()
 
@@ -1232,6 +1275,10 @@ def _ask_ai_uncached(
                 "information was found."
             )
 
+        # ----------------------------------------------------
+        # Prompt
+        # ----------------------------------------------------
+
         prompt = build_hybrid_prompt(
 
             message,
@@ -1241,6 +1288,10 @@ def _ask_ai_uncached(
             pdf_context
 
         )
+
+        # ----------------------------------------------------
+        # Ollama
+        # ----------------------------------------------------
 
         answer = ask_ollama(
             prompt
@@ -1388,7 +1439,8 @@ def _ask_ai_uncached(
         "✅ Relevant PDF found"
     )
 
-    top_results = results
+    # Keep strongest chunks
+    top_results = results[:3]
 
     context = build_pdf_context(
         top_results
@@ -1553,13 +1605,7 @@ def ask_ai(
     )
 
     # ========================================================
-    # GREETING CHECK BEFORE CACHE
-    # ========================================================
-    #
-    # This makes the behavior explicit.
-    # A greeting gets an immediate response and NEVER
-    # touches the RAG system.
-    #
+    # GREETING
     # ========================================================
 
     question = normalize_question(

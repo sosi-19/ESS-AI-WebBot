@@ -56,7 +56,10 @@ def detect_question_intent(question: str) -> str:
         "overview of the report",
     ]
 
-    if any(pattern in q for pattern in summary_patterns):
+    if any(
+        pattern in q
+        for pattern in summary_patterns
+    ):
         return "summary"
 
     # --------------------------------------------------------
@@ -73,7 +76,10 @@ def detect_question_intent(question: str) -> str:
         "what is ",
     ]
 
-    if any(pattern in q for pattern in definition_patterns):
+    if any(
+        pattern in q
+        for pattern in definition_patterns
+    ):
         return "definition"
 
     # --------------------------------------------------------
@@ -110,7 +116,10 @@ def detect_question_intent(question: str) -> str:
         "trend",
     ]
 
-    if any(word in q for word in statistical_words):
+    if any(
+        word in q
+        for word in statistical_words
+    ):
         return "statistics"
 
     return "general"
@@ -152,11 +161,6 @@ def detect_upload_reference(
 
     question_lower = question.lower().strip()
 
-    document_name = metadata.get(
-        "document",
-        ""
-    ).lower()
-
     # --------------------------------------------------------
     # IMPORTANT
     #
@@ -166,6 +170,23 @@ def detect_upload_reference(
 
     if not metadata.get("file_id"):
         return False
+
+    # --------------------------------------------------------
+    # Get document name
+    # --------------------------------------------------------
+
+    document_name = str(
+        metadata.get(
+            "document",
+            metadata.get(
+                "filename",
+                metadata.get(
+                    "source",
+                    ""
+                )
+            )
+        )
+    ).lower()
 
     # --------------------------------------------------------
     # Filename matching
@@ -224,6 +245,10 @@ def extract_report_period(question: str):
 
     q = question.lower()
 
+    # --------------------------------------------------------
+    # Months
+    # --------------------------------------------------------
+
     months = [
         "january",
         "february",
@@ -244,11 +269,19 @@ def extract_report_period(question: str):
     for m in months:
 
         if m in q:
+
             month = m
             break
 
     # --------------------------------------------------------
-    # EFY year
+    # EFY / Gregorian year
+    #
+    # Examples:
+    #
+    # 2017
+    # EFY 2017
+    # efy 2017
+    # year 2017
     # --------------------------------------------------------
 
     year_match = re.search(
@@ -259,6 +292,7 @@ def extract_report_period(question: str):
     year = None
 
     if year_match:
+
         year = year_match.group(0)
 
     return month, year
@@ -277,6 +311,10 @@ def rerank_score(
 
     text_lower = text.lower()
 
+    # --------------------------------------------------------
+    # Detect question intent
+    # --------------------------------------------------------
+
     intent = detect_question_intent(
         question
     )
@@ -292,17 +330,138 @@ def rerank_score(
         1 - distance
     ) * 100
 
-    # --------------------------------------------------------
+    # ========================================================
     # GREETING
-    # --------------------------------------------------------
+    # ========================================================
 
     if intent == "greeting":
 
         return -1000
 
-    # --------------------------------------------------------
+    # ========================================================
+    # REPORT PERIOD MATCHING
+    # ========================================================
+
+    requested_month, requested_year = (
+        extract_report_period(question)
+    )
+
+    if requested_month or requested_year:
+
+        # ----------------------------------------------------
+        # Get document name from metadata
+        # ----------------------------------------------------
+
+        document_name = ""
+
+        if metadata:
+
+            document_name = str(
+                metadata.get(
+                    "document",
+                    metadata.get(
+                        "filename",
+                        metadata.get(
+                            "source",
+                            ""
+                        )
+                    )
+                )
+            ).lower()
+
+        # ----------------------------------------------------
+        # Combine document name + chunk text
+        # ----------------------------------------------------
+
+        period_text = (
+            document_name
+            + " "
+            + text_lower
+        )
+
+        # ----------------------------------------------------
+        # MONTH MATCH
+        # ----------------------------------------------------
+
+        month_match = False
+
+        if requested_month:
+
+            month_match = (
+                requested_month.lower()
+                in period_text
+            )
+
+        # ----------------------------------------------------
+        # YEAR MATCH
+        # ----------------------------------------------------
+
+        year_match = False
+
+        if requested_year:
+
+            year_digits = re.search(
+                r"20\d{2}",
+                requested_year
+            )
+
+            if year_digits:
+
+                year_value = (
+                    year_digits.group(0)
+                )
+
+                year_match = (
+                    year_value
+                    in period_text
+                )
+
+        # ----------------------------------------------------
+        # EXACT MONTH + YEAR MATCH
+        #
+        # Example:
+        #
+        # June EFY 2017
+        #
+        # June + 2017
+        #
+        # Strong bonus.
+        # ----------------------------------------------------
+
+        if (
+            requested_month
+            and requested_year
+            and month_match
+            and year_match
+        ):
+
+            score += 30
+
+        # ----------------------------------------------------
+        # MONTH ONLY MATCH
+        # ----------------------------------------------------
+
+        elif (
+            requested_month
+            and month_match
+        ):
+
+            score += 8
+
+        # ----------------------------------------------------
+        # YEAR ONLY MATCH
+        # ----------------------------------------------------
+
+        elif (
+            requested_year
+            and year_match
+        ):
+
+            score += 8
+
+    # ========================================================
     # SUMMARY
-    # --------------------------------------------------------
+    # ========================================================
 
     if intent == "summary":
 
@@ -319,36 +478,65 @@ def rerank_score(
             "cpi",
         ]
 
+        # ----------------------------------------------------
+        # Summary keyword bonus
+        # ----------------------------------------------------
+
         for word in summary_words:
 
             if word in text_lower:
+
                 score += 8
 
+        # ----------------------------------------------------
+        # Tables can contain useful information
+        # ----------------------------------------------------
+
         if "table" in text_lower:
+
             score += 2
 
-        # Summary chunks containing substantial text
-        # are generally more useful.
+        # ----------------------------------------------------
+        # Longer chunks provide broader context
+        # ----------------------------------------------------
+
         if len(text) > 500:
+
             score += 3
 
         if len(text) > 800:
+
             score += 2
 
-    # --------------------------------------------------------
+    # ========================================================
     # STATISTICS
-    # --------------------------------------------------------
+    # ========================================================
 
     elif intent == "statistics":
 
+        # ----------------------------------------------------
+        # Table bonus
+        # ----------------------------------------------------
+
         if "table" in text_lower:
+
             score += 8
 
+        # ----------------------------------------------------
+        # Percentage bonus
+        # ----------------------------------------------------
+
         if "%" in text:
+
             score += 5
 
         if "percent" in text_lower:
+
             score += 5
+
+        # ----------------------------------------------------
+        # Statistical keywords
+        # ----------------------------------------------------
 
         if any(
             word in text_lower
@@ -361,7 +549,12 @@ def rerank_score(
                 "country",
             ]
         ):
+
             score += 4
+
+        # ----------------------------------------------------
+        # Number-rich chunks
+        # ----------------------------------------------------
 
         numbers = re.findall(
             r"\d+(?:\.\d+)?",
@@ -369,11 +562,12 @@ def rerank_score(
         )
 
         if len(numbers) >= 5:
+
             score += 3
 
-    # --------------------------------------------------------
+    # ========================================================
     # DEFINITION
-    # --------------------------------------------------------
+    # ========================================================
 
     elif intent == "definition":
 
@@ -387,18 +581,28 @@ def rerank_score(
             "is computed",
         ]
 
+        # ----------------------------------------------------
+        # Definition keyword bonus
+        # ----------------------------------------------------
+
         if any(
             word in text_lower
             for word in definition_words
         ):
+
             score += 15
 
+        # ----------------------------------------------------
+        # Tables are usually less useful for definitions
+        # ----------------------------------------------------
+
         if "table" in text_lower:
+
             score -= 5
 
-    # --------------------------------------------------------
+    # ========================================================
     # UPLOADED FILE
-    # --------------------------------------------------------
+    # ========================================================
 
     if metadata:
 
@@ -406,7 +610,12 @@ def rerank_score(
             question,
             metadata
         ):
+
             score += 40
+
+    # ========================================================
+    # FINAL SCORE
+    # ========================================================
 
     return round(
         score,
@@ -429,9 +638,7 @@ class Retriever:
         # ----------------------------------------------------
         # Normal Chroma distance threshold
         #
-        # IMPORTANT:
-        # We keep this at 1.0 for normal questions.
-        # Uploaded summaries are handled separately below.
+        # Lower distance = better match.
         # ----------------------------------------------------
 
         self.distance_threshold = 1.0
@@ -439,12 +646,8 @@ class Retriever:
         # ----------------------------------------------------
         # Uploaded summary threshold
         #
-        # Chroma distances in the uploaded PDF can be greater
-        # than 1.0 even when the chunks belong to the correct
-        # uploaded document.
-        #
-        # For summaries, we already know the exact file_id,
-        # so the file filter itself provides strong safety.
+        # Uploaded summaries are restricted by file_id,
+        # so we can safely allow a larger distance.
         # ----------------------------------------------------
 
         self.upload_summary_distance_threshold = 2.0
@@ -459,18 +662,21 @@ class Retriever:
     ) -> bool:
 
         if not file_id:
+
             return False
 
         try:
 
-            results = self.store.collection.get(
-                where={
-                    "file_id": file_id
-                },
-                limit=1,
-                include=[
-                    "metadatas"
-                ]
+            results = (
+                self.store.collection.get(
+                    where={
+                        "file_id": file_id
+                    },
+                    limit=1,
+                    include=[
+                        "metadatas"
+                    ]
+                )
             )
 
             metadatas = results.get(
@@ -560,7 +766,7 @@ class Retriever:
             )
 
             # ------------------------------------------------
-            # Make sure file actually exists
+            # Make sure uploaded file exists
             # ------------------------------------------------
 
             if not self.file_exists(
@@ -583,9 +789,23 @@ class Retriever:
         # CREATE EMBEDDING
         # ====================================================
 
-        embedding = self.embedder.encode(
-            question
-        ).tolist()
+        try:
+
+            embedding = (
+                self.embedder
+                .encode(question)
+                .tolist()
+            )
+
+        except Exception as e:
+
+            print(
+                "❌ Embedding failed:"
+            )
+
+            print(e)
+
+            return []
 
         # ====================================================
         # CHROMA QUERY
@@ -598,22 +818,17 @@ class Retriever:
             ],
 
             "n_results": candidate_results,
-
         }
 
         # ----------------------------------------------------
-        # IMPORTANT
+        # IMPORTANT:
         #
-        # If file_id exists:
-        #
-        # ONLY search that file.
+        # If file_id exists, ONLY search that uploaded file.
         # ----------------------------------------------------
 
         if file_id:
 
-            query_kwargs[
-                "where"
-            ] = {
+            query_kwargs["where"] = {
                 "file_id": file_id
             }
 
@@ -623,8 +838,10 @@ class Retriever:
 
         try:
 
-            results = self.store.collection.query(
-                **query_kwargs
+            results = (
+                self.store.collection.query(
+                    **query_kwargs
+                )
             )
 
         except Exception as e:
@@ -688,22 +905,9 @@ class Retriever:
             "=" * 80
         )
 
-        # ----------------------------------------------------
-        # SPECIAL MODE
-        #
-        # Uploaded PDF + summary
-        #
-        # The exact file_id is already filtering Chroma.
-        # Therefore don't use the normal 1.0 threshold.
-        #
-        # Instead allow distances up to 2.0.
-        #
-        # This fixes:
-        #
-        # "summarize the report"
-        #
-        # returning zero results.
-        # ----------------------------------------------------
+        # ====================================================
+        # UPLOADED SUMMARY MODE
+        # ====================================================
 
         uploaded_summary_mode = (
             file_id is not None
@@ -731,9 +935,9 @@ class Retriever:
                 file_id
             )
 
-        # ----------------------------------------------------
-        # Process Chroma results
-        # ----------------------------------------------------
+        # ====================================================
+        # PROCESS CHROMA RESULTS
+        # ====================================================
 
         for index, (
             doc,
@@ -748,10 +952,19 @@ class Retriever:
             start=1
         ):
 
+            # ------------------------------------------------
+            # Ignore empty documents
+            # ------------------------------------------------
+
             if not doc:
+
                 continue
 
             meta = meta or {}
+
+            # ------------------------------------------------
+            # Metadata
+            # ------------------------------------------------
 
             document_name = meta.get(
                 "document",
@@ -771,6 +984,10 @@ class Retriever:
             result_file_id = meta.get(
                 "file_id"
             )
+
+            # ------------------------------------------------
+            # Debug information
+            # ------------------------------------------------
 
             print(
                 f"\nChunk #{index}"
@@ -823,9 +1040,7 @@ class Retriever:
             # =================================================
 
             # -------------------------------------------------
-            # Uploaded summary:
-            #
-            # Use the relaxed summary threshold.
+            # Uploaded summary mode
             # -------------------------------------------------
 
             if uploaded_summary_mode:
@@ -848,9 +1063,7 @@ class Retriever:
                 )
 
             # -------------------------------------------------
-            # Normal questions:
-            #
-            # Keep the original strict threshold.
+            # Normal mode
             # -------------------------------------------------
 
             else:
@@ -875,12 +1088,20 @@ class Retriever:
 
             try:
 
-                best_paragraph = extract_best_paragraph(
-                    doc,
-                    question
+                best_paragraph = (
+                    extract_best_paragraph(
+                        doc,
+                        question
+                    )
                 )
 
-            except Exception:
+            except Exception as e:
+
+                print(
+                    "⚠️ Paragraph extraction failed:"
+                )
+
+                print(e)
 
                 best_paragraph = doc
 
@@ -900,22 +1121,27 @@ class Retriever:
             )
 
             # -------------------------------------------------
-            # For uploaded summaries, slightly reward longer
-            # chunks because summaries need broader context.
+            # Uploaded summaries need broader context.
             # -------------------------------------------------
 
             if uploaded_summary_mode:
 
                 if len(best_paragraph) >= 500:
+
                     score += 5
 
                 if len(best_paragraph) >= 800:
+
                     score += 5
 
             score = round(
                 score,
                 2
             )
+
+            # =================================================
+            # SIMILARITY
+            # =================================================
 
             similarity = (
                 1 - distance
@@ -955,7 +1181,6 @@ class Retriever:
                 "distance": distance,
 
                 "score": score,
-
             })
 
         # ====================================================
@@ -970,17 +1195,17 @@ class Retriever:
         )
 
         # ====================================================
-        # LIMIT
+        # LIMIT RESULTS
         # ====================================================
 
-        # ----------------------------------------------------
-        # For an uploaded summary, use more chunks.
-        #
-        # A report summary needs broader coverage than a
-        # single factual question.
-        # ----------------------------------------------------
-
         if uploaded_summary_mode:
+
+            # ------------------------------------------------
+            # Summary gets more chunks.
+            #
+            # Minimum target = 10
+            # But never exceed available results.
+            # ------------------------------------------------
 
             summary_limit = min(
                 max(n_results, 10),

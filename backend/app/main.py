@@ -1,21 +1,38 @@
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.database.connection import Base, engine
 
+# ==========================================
 # Models
+# ==========================================
+
 from app.models import User, ChatHistory
 
+# ==========================================
 # Routers
+# ==========================================
+
+# AI Chat
 from app.routers.chat import router as chat_router
+
+# Chat History
 from app.routers import chat_history
+
+# Authentication
 from app.auth.router import router as auth_router
+
+# Users
 from app.routers.user import router as user_router
 
-# NEW - Upload Router
+# Upload
 from app.routers.upload import router as upload_router
 
+# ==========================================
 # Services
+# ==========================================
+
 from app.services.csv_service import csv_service
 from app.services.data_analysis_service import analysis_service
 from app.services.csv_ai_service import csv_ai_service
@@ -27,6 +44,10 @@ from app.services.csv_ai_service import csv_ai_service
 
 Base.metadata.create_all(bind=engine)
 
+
+# ==========================================
+# Create FastAPI Application
+# ==========================================
 
 app = FastAPI(
     title="ESS AI Web Assistant",
@@ -70,12 +91,12 @@ app.include_router(chat_router)
 # Chat History
 app.include_router(chat_history.router)
 
-# NEW - Upload
+# Upload
 app.include_router(upload_router)
 
 
 # ==========================================
-# Root
+# Root Endpoint
 # ==========================================
 
 @app.get("/")
@@ -111,6 +132,7 @@ def unique_values(
     df = csv_service.get_dataset(dataset)
 
     if df is None:
+
         return {
             "error": "Dataset not found"
         }
@@ -127,6 +149,7 @@ def count_dataset(dataset: str):
     df = csv_service.get_dataset(dataset)
 
     if df is None:
+
         return {
             "error": "Dataset not found"
         }
@@ -143,6 +166,7 @@ def maximum(
     df = csv_service.get_dataset(dataset)
 
     if df is None:
+
         return {
             "error": "Dataset not found"
         }
@@ -162,6 +186,7 @@ def minimum(
     df = csv_service.get_dataset(dataset)
 
     if df is None:
+
         return {
             "error": "Dataset not found"
         }
