@@ -11,30 +11,59 @@ class CodebookService:
         self.load()
 
 
-
     def load(self):
 
-        # Get current file location:
-        # backend/app/services/codebook_service.py
+        # -------------------------------------------------
+        # Project structure:
+        #
+        # ESS-AI-WebBot/
+        # ├── backend/
+        # │   └── app/
+        # │       └── services/
+        # │           └── codebook_service.py
+        # └── data/
+        #     └── codebook.json
+        #
+        # Docker:
+        # /app/
+        # ├── app/
+        # └── data/
+        # -------------------------------------------------
 
         current_dir = os.path.dirname(
             os.path.abspath(__file__)
         )
 
-
-        # Go from:
-        # backend/app/services
-        #
-        # back to:
-        # ESS-AI-WebBot/data/codebook.json
-
-        path = os.path.join(
-            current_dir,
-            "../../../data/codebook.json"
+        # Try the project path first
+        local_path = os.path.abspath(
+            os.path.join(
+                current_dir,
+                "../../../data/codebook.json"
+            )
         )
 
+        # Docker path
+        docker_path = "/app/data/codebook.json"
 
-        if os.path.exists(path):
+        if os.path.exists(local_path):
+
+            path = local_path
+
+        elif os.path.exists(docker_path):
+
+            path = docker_path
+
+        else:
+
+            print("❌ Codebook file not found:")
+            print("Tried:")
+            print(local_path)
+            print(docker_path)
+
+            return
+
+
+        try:
 
             with open(
                 path,
@@ -49,11 +78,10 @@ class CodebookService:
             print(path)
 
 
-        else:
+        except Exception as e:
 
-            print("❌ Codebook file not found:")
-            print(path)
-
+            print("❌ Failed to load codebook:")
+            print(e)
 
 
     def get_variable(self, name):
@@ -61,7 +89,6 @@ class CodebookService:
         return self.codebook.get(
             name.lower()
         )
-
 
 
 codebook_service = CodebookService()
