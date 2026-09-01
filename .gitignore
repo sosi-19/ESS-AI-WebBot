@@ -16,6 +16,7 @@ backend/**/__pycache__/
 backend/.env
 .env
 .env.*
+!.env.example
 
 # ============================================================
 # Chroma / Vector Database
