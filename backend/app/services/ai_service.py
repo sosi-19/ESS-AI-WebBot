@@ -1,3 +1,4 @@
+import os
 import time
 import requests
 
@@ -8,9 +9,13 @@ from app.services.csv_ai_service import csv_ai_service
 # ============================================================
 # OLLAMA CONFIGURATION
 # ============================================================
+OLLAMA_URL = os.getenv(
+    "OLLAMA_URL",
+    "http://localhost:11434/api/generate"
+)
 
-OLLAMA_URL = "http://localhost:11434/api/generate"
-MODEL = "qwen2.5:1.5b"
+MODEL = os.getenv("OLLAMA_MODEL", "qwen2.5:1.5b")
+
 
 
 # ============================================================
