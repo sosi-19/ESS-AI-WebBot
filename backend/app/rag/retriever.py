@@ -1,7 +1,6 @@
 from app.rag.embedding_service import EmbeddingService
 from app.rag.vector_store import VectorStore
 from app.rag.paragraph_extractor import extract_best_paragraph
-
 import re
 
 
@@ -56,11 +55,47 @@ def detect_question_intent(question: str) -> str:
         "overview of the report",
     ]
 
-    if any(
-        pattern in q
-        for pattern in summary_patterns
-    ):
+    if any(pattern in q for pattern in summary_patterns):
         return "summary"
+
+    # ========================================================
+    # COMPARISON
+    # ========================================================
+    #
+    # IMPORTANT:
+    # Comparison MUST be checked BEFORE definition.
+    #
+    # Example:
+    # "What is the difference between employed and unemployed?"
+    #
+    # This should return:
+    # comparison
+    #
+    # NOT:
+    # definition
+    # ========================================================
+
+    comparison_patterns = [
+        "difference between",
+        "difference among",
+        "difference of",
+        "distinction between",
+        "distinction among",
+        "compare ",
+        "compare the",
+        "comparison between",
+        "comparison of",
+        "versus",
+        " vs ",
+        " vs.",
+        "how is",
+        "how are",
+        "different from",
+        "different than",
+    ]
+
+    if any(pattern in q for pattern in comparison_patterns):
+        return "comparison"
 
     # --------------------------------------------------------
     # Definition
@@ -68,18 +103,21 @@ def detect_question_intent(question: str) -> str:
 
     definition_patterns = [
         "define ",
+        "definition",
         "definition of",
         "meaning of",
         "what does",
         "what is the meaning",
-        "explain the concept",
         "what is ",
+        "what are ",
+        "who are ",
+        "explain the concept",
+        "explain what",
+        "refers to",
+        "means",
     ]
 
-    if any(
-        pattern in q
-        for pattern in definition_patterns
-    ):
+    if any(pattern in q for pattern in definition_patterns):
         return "definition"
 
     # --------------------------------------------------------
@@ -116,10 +154,7 @@ def detect_question_intent(question: str) -> str:
         "trend",
     ]
 
-    if any(
-        word in q
-        for word in statistical_words
-    ):
+    if any(word in q for word in statistical_words):
         return "statistics"
 
     return "general"
@@ -161,19 +196,8 @@ def detect_upload_reference(
 
     question_lower = question.lower().strip()
 
-    # --------------------------------------------------------
-    # IMPORTANT
-    #
-    # file_id is the reliable indicator that this is an
-    # uploaded document.
-    # --------------------------------------------------------
-
     if not metadata.get("file_id"):
         return False
-
-    # --------------------------------------------------------
-    # Get document name
-    # --------------------------------------------------------
 
     document_name = str(
         metadata.get(
@@ -187,10 +211,6 @@ def detect_upload_reference(
             )
         )
     ).lower()
-
-    # --------------------------------------------------------
-    # Filename matching
-    # --------------------------------------------------------
 
     filename_words = [
         word
@@ -209,10 +229,6 @@ def detect_upload_reference(
 
     if matches >= 2:
         return True
-
-    # --------------------------------------------------------
-    # Explicit references
-    # --------------------------------------------------------
 
     upload_words = [
         "uploaded",
@@ -245,10 +261,6 @@ def extract_report_period(question: str):
 
     q = question.lower()
 
-    # --------------------------------------------------------
-    # Months
-    # --------------------------------------------------------
-
     months = [
         "january",
         "february",
@@ -269,19 +281,12 @@ def extract_report_period(question: str):
     for m in months:
 
         if m in q:
-
             month = m
             break
 
     # --------------------------------------------------------
-    # EFY / Gregorian year
-    #
-    # Examples:
-    #
-    # 2017
-    # EFY 2017
-    # efy 2017
-    # year 2017
+    # Detect normal years such as 2021, 2022, 2023
+    # Also supports EFY 2018 style wording.
     # --------------------------------------------------------
 
     year_match = re.search(
@@ -292,10 +297,405 @@ def extract_report_period(question: str):
     year = None
 
     if year_match:
-
         year = year_match.group(0)
 
     return month, year
+
+
+# ============================================================
+# WORD HELPERS
+# ============================================================
+
+def contains_word(text: str, word: str) -> bool:
+
+    return bool(
+        re.search(
+            rf"\b{re.escape(word)}\b",
+            text.lower()
+        )
+    )
+
+
+def contains_any_word(
+    text: str,
+    words: list[str]
+) -> bool:
+
+    text_lower = text.lower()
+
+    return any(
+        contains_word(
+            text_lower,
+            word
+        )
+        for word in words
+    )
+
+
+# ============================================================
+# DEFINITION KEYWORD SCORING
+# ============================================================
+
+def definition_keyword_score(
+    question: str,
+    text: str
+) -> float:
+
+    q = question.lower()
+    t = text.lower()
+
+    score = 0.0
+
+    # --------------------------------------------------------
+    # Strong ESS-style definition phrases
+    # --------------------------------------------------------
+
+    strong_definition_phrases = [
+        "defined as",
+        "is defined as",
+        "are defined as",
+        "definition of",
+        "definition for",
+        "refers to",
+        "refers to persons",
+        "consists of persons",
+        "consist of persons",
+        "persons who",
+        "persons aged",
+        "population consists of",
+        "population is defined",
+        "population are defined",
+        "means persons",
+        "includes persons",
+        "those persons who",
+    ]
+
+    for phrase in strong_definition_phrases:
+
+        if phrase in t:
+            score += 12
+
+    # --------------------------------------------------------
+    # Employment-specific definition phrases
+    # --------------------------------------------------------
+
+    employment_definition_phrases = [
+        "employed population consists of",
+        "employed persons who",
+        "employed persons are",
+        "employed population is",
+        "employed population are",
+        "definition of employment",
+        "definition of employed",
+        "currently employed persons",
+        "currently employed population",
+        "productive activity or work",
+        "work at least for one hour",
+        "worked at least one hour",
+        "seven days prior",
+        "reference week",
+    ]
+
+    for phrase in employment_definition_phrases:
+
+        if phrase in t:
+            score += 20
+
+    # --------------------------------------------------------
+    # Unemployment-specific definition phrases
+    # --------------------------------------------------------
+
+    unemployment_definition_phrases = [
+        "definition of unemployment",
+        "definition of unemployed",
+        "unemployed population consists of",
+        "unemployed persons who",
+        "unemployed persons are",
+        "measurement of unemployment",
+        "without work",
+        "available for work",
+        "seeking work",
+        "ready to take a job",
+        "no job but available to work",
+        "had no work but were available",
+        "relaxed definition of unemployment",
+        "standard definition of unemployment",
+    ]
+
+    for phrase in unemployment_definition_phrases:
+
+        if phrase in t:
+            score += 20
+
+    # --------------------------------------------------------
+    # If question explicitly asks about employment
+    # --------------------------------------------------------
+
+    if (
+        contains_word(q, "employed")
+        or contains_word(q, "employment")
+    ):
+
+        if (
+            contains_word(t, "employed")
+            or contains_word(t, "employment")
+        ):
+            score += 8
+
+    # --------------------------------------------------------
+    # If question explicitly asks about unemployment
+    # --------------------------------------------------------
+
+    if (
+        contains_word(q, "unemployed")
+        or contains_word(q, "unemployment")
+    ):
+
+        if (
+            contains_word(t, "unemployed")
+            or contains_word(t, "unemployment")
+        ):
+            score += 8
+
+    # ========================================================
+    # COMPARISON QUESTIONS
+    # ========================================================
+
+    comparison_question = any(
+        phrase in q
+        for phrase in [
+            "difference between",
+            "difference among",
+            "difference of",
+            "distinction between",
+            "distinction among",
+            "compare ",
+            "comparison between",
+            "comparison of",
+            "versus",
+            " vs ",
+            " vs.",
+            "different from",
+            "different than",
+        ]
+    )
+
+    if comparison_question:
+
+        # ----------------------------------------------------
+        # IMPORTANT:
+        # Use word boundaries.
+        #
+        # "employed" should NOT match "unemployed".
+        # ----------------------------------------------------
+
+        has_employed = (
+            contains_word(
+                t,
+                "employed"
+            )
+            or contains_word(
+                t,
+                "employment"
+            )
+        )
+
+        has_unemployed = (
+            contains_word(
+                t,
+                "unemployed"
+            )
+            or contains_word(
+                t,
+                "unemployment"
+            )
+        )
+
+        if has_employed:
+            score += 12
+
+        if has_unemployed:
+            score += 12
+
+        # ----------------------------------------------------
+        # Strong bonus when BOTH concepts occur.
+        # ----------------------------------------------------
+
+        if has_employed and has_unemployed:
+            score += 20
+
+        # ----------------------------------------------------
+        # Additional ESS unemployment criteria.
+        # ----------------------------------------------------
+
+        if "without work" in t:
+            score += 8
+
+        if "available for work" in t:
+            score += 8
+
+        if "seeking work" in t:
+            score += 8
+
+        # ----------------------------------------------------
+        # Additional employment criteria.
+        # ----------------------------------------------------
+
+        employment_phrases = [
+            "productive activity",
+            "economic activity",
+            "worked at least",
+            "work at least",
+            "reference week",
+            "reference period",
+            "paid employment",
+            "self employment",
+            "own account",
+        ]
+
+        for phrase in employment_phrases:
+
+            if phrase in t:
+                score += 8
+
+    # --------------------------------------------------------
+    # Definition questions prefer text-heavy chunks
+    # --------------------------------------------------------
+
+    if len(text) >= 300:
+        score += 2
+
+    if len(text) >= 600:
+        score += 2
+
+    return score
+
+
+# ============================================================
+# COMPARISON KEYWORD SCORING
+# ============================================================
+
+def comparison_keyword_score(
+    question: str,
+    text: str
+) -> float:
+
+    q = question.lower()
+    t = text.lower()
+
+    score = 0.0
+
+    comparison_question = any(
+        phrase in q
+        for phrase in [
+            "difference between",
+            "difference among",
+            "difference of",
+            "distinction between",
+            "distinction among",
+            "compare ",
+            "comparison between",
+            "comparison of",
+            "versus",
+            " vs ",
+            " vs.",
+            "different from",
+            "different than",
+        ]
+    )
+
+    if not comparison_question:
+        return score
+
+    # --------------------------------------------------------
+    # Employment concept
+    # --------------------------------------------------------
+
+    has_employed = (
+        contains_word(t, "employed")
+        or contains_word(t, "employment")
+    )
+
+    has_unemployed = (
+        contains_word(t, "unemployed")
+        or contains_word(t, "unemployment")
+    )
+
+    if has_employed:
+        score += 20
+
+    if has_unemployed:
+        score += 20
+
+    # --------------------------------------------------------
+    # BEST CASE:
+    # Same chunk contains both concepts.
+    # --------------------------------------------------------
+
+    if has_employed and has_unemployed:
+        score += 30
+
+    # --------------------------------------------------------
+    # Employment-related evidence
+    # --------------------------------------------------------
+
+    employment_phrases = [
+        "productive activity",
+        "economic activity",
+        "worked",
+        "work",
+        "working",
+        "paid employment",
+        "self employment",
+        "own account",
+        "reference week",
+        "reference period",
+    ]
+
+    for phrase in employment_phrases:
+
+        if phrase in t:
+            score += 5
+
+    # --------------------------------------------------------
+    # Unemployment-related evidence
+    # --------------------------------------------------------
+
+    unemployment_phrases = [
+        "without work",
+        "available for work",
+        "seeking work",
+        "looking for work",
+        "ready to take a job",
+        "no job but available",
+        "standard definition",
+        "relaxed definition",
+    ]
+
+    for phrase in unemployment_phrases:
+
+        if phrase in t:
+            score += 5
+
+    # --------------------------------------------------------
+    # Definition language
+    # --------------------------------------------------------
+
+    definition_phrases = [
+        "defined as",
+        "definition of",
+        "refers to",
+        "consists of persons",
+        "persons who",
+        "population consists",
+    ]
+
+    for phrase in definition_phrases:
+
+        if phrase in t:
+            score += 6
+
+    return score
 
 
 # ============================================================
@@ -311,19 +711,12 @@ def rerank_score(
 
     text_lower = text.lower()
 
-    # --------------------------------------------------------
-    # Detect question intent
-    # --------------------------------------------------------
-
     intent = detect_question_intent(
         question
     )
 
     # --------------------------------------------------------
     # Base similarity
-    #
-    # Chroma distance:
-    # lower = better
     # --------------------------------------------------------
 
     score = (
@@ -335,11 +728,10 @@ def rerank_score(
     # ========================================================
 
     if intent == "greeting":
-
         return -1000
 
     # ========================================================
-    # REPORT PERIOD MATCHING
+    # REPORT PERIOD
     # ========================================================
 
     requested_month, requested_year = (
@@ -347,10 +739,6 @@ def rerank_score(
     )
 
     if requested_month or requested_year:
-
-        # ----------------------------------------------------
-        # Get document name from metadata
-        # ----------------------------------------------------
 
         document_name = ""
 
@@ -369,19 +757,11 @@ def rerank_score(
                 )
             ).lower()
 
-        # ----------------------------------------------------
-        # Combine document name + chunk text
-        # ----------------------------------------------------
-
         period_text = (
             document_name
             + " "
             + text_lower
         )
-
-        # ----------------------------------------------------
-        # MONTH MATCH
-        # ----------------------------------------------------
 
         month_match = False
 
@@ -391,10 +771,6 @@ def rerank_score(
                 requested_month.lower()
                 in period_text
             )
-
-        # ----------------------------------------------------
-        # YEAR MATCH
-        # ----------------------------------------------------
 
         year_match = False
 
@@ -416,18 +792,6 @@ def rerank_score(
                     in period_text
                 )
 
-        # ----------------------------------------------------
-        # EXACT MONTH + YEAR MATCH
-        #
-        # Example:
-        #
-        # June EFY 2017
-        #
-        # June + 2017
-        #
-        # Strong bonus.
-        # ----------------------------------------------------
-
         if (
             requested_month
             and requested_year
@@ -437,20 +801,12 @@ def rerank_score(
 
             score += 30
 
-        # ----------------------------------------------------
-        # MONTH ONLY MATCH
-        # ----------------------------------------------------
-
         elif (
             requested_month
             and month_match
         ):
 
             score += 8
-
-        # ----------------------------------------------------
-        # YEAR ONLY MATCH
-        # ----------------------------------------------------
 
         elif (
             requested_year
@@ -478,34 +834,18 @@ def rerank_score(
             "cpi",
         ]
 
-        # ----------------------------------------------------
-        # Summary keyword bonus
-        # ----------------------------------------------------
-
         for word in summary_words:
 
             if word in text_lower:
-
                 score += 8
 
-        # ----------------------------------------------------
-        # Tables can contain useful information
-        # ----------------------------------------------------
-
         if "table" in text_lower:
-
             score += 2
 
-        # ----------------------------------------------------
-        # Longer chunks provide broader context
-        # ----------------------------------------------------
-
         if len(text) > 500:
-
             score += 3
 
         if len(text) > 800:
-
             score += 2
 
     # ========================================================
@@ -514,29 +854,14 @@ def rerank_score(
 
     elif intent == "statistics":
 
-        # ----------------------------------------------------
-        # Table bonus
-        # ----------------------------------------------------
-
         if "table" in text_lower:
-
             score += 8
 
-        # ----------------------------------------------------
-        # Percentage bonus
-        # ----------------------------------------------------
-
         if "%" in text:
-
             score += 5
 
         if "percent" in text_lower:
-
             score += 5
-
-        # ----------------------------------------------------
-        # Statistical keywords
-        # ----------------------------------------------------
 
         if any(
             word in text_lower
@@ -549,12 +874,7 @@ def rerank_score(
                 "country",
             ]
         ):
-
             score += 4
-
-        # ----------------------------------------------------
-        # Number-rich chunks
-        # ----------------------------------------------------
 
         numbers = re.findall(
             r"\d+(?:\.\d+)?",
@@ -562,7 +882,6 @@ def rerank_score(
         )
 
         if len(numbers) >= 5:
-
             score += 3
 
     # ========================================================
@@ -571,34 +890,56 @@ def rerank_score(
 
     elif intent == "definition":
 
-        definition_words = [
-            "defined as",
-            "definition",
-            "refers to",
-            "means",
-            "is defined",
-            "is calculated",
-            "is computed",
-        ]
+        score += definition_keyword_score(
+            question,
+            text
+        )
 
         # ----------------------------------------------------
-        # Definition keyword bonus
-        # ----------------------------------------------------
-
-        if any(
-            word in text_lower
-            for word in definition_words
-        ):
-
-            score += 15
-
-        # ----------------------------------------------------
-        # Tables are usually less useful for definitions
+        # Definitions are usually prose, not tables.
         # ----------------------------------------------------
 
         if "table" in text_lower:
-
             score -= 5
+
+        # ----------------------------------------------------
+        # Strong penalty for purely numerical chunks.
+        # ----------------------------------------------------
+
+        numbers = re.findall(
+            r"\d+(?:\.\d+)?",
+            text
+        )
+
+        if len(numbers) >= 10:
+            score -= 3
+
+    # ========================================================
+    # COMPARISON
+    # ========================================================
+
+    elif intent == "comparison":
+
+        score += comparison_keyword_score(
+            question,
+            text
+        )
+
+        # ----------------------------------------------------
+        # Comparison questions should prefer explanatory
+        # prose instead of large numerical tables.
+        # ----------------------------------------------------
+
+        if "table" in text_lower:
+            score -= 3
+
+        numbers = re.findall(
+            r"\d+(?:\.\d+)?",
+            text
+        )
+
+        if len(numbers) >= 15:
+            score -= 3
 
     # ========================================================
     # UPLOADED FILE
@@ -610,12 +951,7 @@ def rerank_score(
             question,
             metadata
         ):
-
             score += 40
-
-    # ========================================================
-    # FINAL SCORE
-    # ========================================================
 
     return round(
         score,
@@ -631,26 +967,29 @@ class Retriever:
 
     def __init__(self):
 
+        print(
+            "\nInitializing ESS Retriever..."
+        )
+
         self.embedder = EmbeddingService()
 
         self.store = VectorStore()
 
         # ----------------------------------------------------
         # Normal Chroma distance threshold
-        #
-        # Lower distance = better match.
         # ----------------------------------------------------
 
         self.distance_threshold = 1.0
 
         # ----------------------------------------------------
         # Uploaded summary threshold
-        #
-        # Uploaded summaries are restricted by file_id,
-        # so we can safely allow a larger distance.
         # ----------------------------------------------------
 
         self.upload_summary_distance_threshold = 2.0
+
+        print(
+            "ESS Retriever initialized."
+        )
 
     # ========================================================
     # FILE EXISTENCE CHECK
@@ -662,7 +1001,6 @@ class Retriever:
     ) -> bool:
 
         if not file_id:
-
             return False
 
         try:
@@ -689,7 +1027,7 @@ class Retriever:
         except Exception as e:
 
             print(
-                "❌ File existence check failed:"
+                "File existence check failed:"
             )
 
             print(e)
@@ -717,7 +1055,7 @@ class Retriever:
         if not question:
 
             print(
-                "⚠️ Empty question."
+                "Empty question."
             )
 
             return []
@@ -729,11 +1067,11 @@ class Retriever:
         if is_greeting(question):
 
             print(
-                "👋 Greeting detected."
+                "Greeting detected."
             )
 
             print(
-                "🚫 RAG search skipped."
+                "RAG search skipped."
             )
 
             return []
@@ -751,13 +1089,43 @@ class Retriever:
         )
 
         # ====================================================
+        # DEFINITION / COMPARISON QUESTIONS
+        # ====================================================
+
+        effective_candidate_results = (
+            candidate_results
+        )
+
+        # ----------------------------------------------------
+        # Both definition and comparison questions can have
+        # their evidence split across adjacent chunks.
+        # ----------------------------------------------------
+
+        if intent in (
+            "definition",
+            "comparison"
+        ):
+
+            effective_candidate_results = max(
+                candidate_results,
+                50
+            )
+
+            print(
+                f"{intent.capitalize()} search: "
+                f"expanding candidates "
+                f"from {candidate_results} to "
+                f"{effective_candidate_results}"
+            )
+
+        # ====================================================
         # FILE MODE
         # ====================================================
 
         if file_id:
 
             print(
-                "\n📎 FILE-SPECIFIC SEARCH"
+                "\nFILE-SPECIFIC SEARCH"
             )
 
             print(
@@ -765,16 +1133,12 @@ class Retriever:
                 file_id
             )
 
-            # ------------------------------------------------
-            # Make sure uploaded file exists
-            # ------------------------------------------------
-
             if not self.file_exists(
                 file_id
             ):
 
                 print(
-                    "❌ Uploaded file was not found in Chroma."
+                    "Uploaded file was not found in Chroma."
                 )
 
                 return []
@@ -782,7 +1146,7 @@ class Retriever:
         else:
 
             print(
-                "\n🌍 ESS-WIDE SEARCH"
+                "\nESS-WIDE SEARCH"
             )
 
         # ====================================================
@@ -800,7 +1164,7 @@ class Retriever:
         except Exception as e:
 
             print(
-                "❌ Embedding failed:"
+                "Embedding failed:"
             )
 
             print(e)
@@ -817,13 +1181,12 @@ class Retriever:
                 embedding
             ],
 
-            "n_results": candidate_results,
+            "n_results":
+                effective_candidate_results,
         }
 
         # ----------------------------------------------------
-        # IMPORTANT:
-        #
-        # If file_id exists, ONLY search that uploaded file.
+        # Uploaded PDF = ONLY that file
         # ----------------------------------------------------
 
         if file_id:
@@ -847,7 +1210,7 @@ class Retriever:
         except Exception as e:
 
             print(
-                "❌ Chroma search failed:"
+                "Chroma search failed:"
             )
 
             print(e)
@@ -861,7 +1224,7 @@ class Retriever:
         if not results:
 
             print(
-                "⚠️ Chroma returned no results."
+                "Chroma returned no results."
             )
 
             return []
@@ -917,7 +1280,7 @@ class Retriever:
         if uploaded_summary_mode:
 
             print(
-                "\n📝 UPLOADED PDF SUMMARY MODE"
+                "\nUPLOADED PDF SUMMARY MODE"
             )
 
             print(
@@ -952,19 +1315,10 @@ class Retriever:
             start=1
         ):
 
-            # ------------------------------------------------
-            # Ignore empty documents
-            # ------------------------------------------------
-
             if not doc:
-
                 continue
 
             meta = meta or {}
-
-            # ------------------------------------------------
-            # Metadata
-            # ------------------------------------------------
 
             document_name = meta.get(
                 "document",
@@ -984,10 +1338,6 @@ class Retriever:
             result_file_id = meta.get(
                 "file_id"
             )
-
-            # ------------------------------------------------
-            # Debug information
-            # ------------------------------------------------
 
             print(
                 f"\nChunk #{index}"
@@ -1030,7 +1380,7 @@ class Retriever:
                 if result_file_id != file_id:
 
                     print(
-                        "❌ WRONG FILE — REJECTED"
+                        "WRONG FILE — REJECTED"
                     )
 
                     continue
@@ -1038,10 +1388,6 @@ class Retriever:
             # =================================================
             # DISTANCE FILTER
             # =================================================
-
-            # -------------------------------------------------
-            # Uploaded summary mode
-            # -------------------------------------------------
 
             if uploaded_summary_mode:
 
@@ -1051,7 +1397,7 @@ class Retriever:
                 ):
 
                     print(
-                        "❌ Rejected:"
+                        "Rejected:"
                         f" distance > "
                         f"{self.upload_summary_distance_threshold}"
                     )
@@ -1059,19 +1405,15 @@ class Retriever:
                     continue
 
                 print(
-                    "✅ Accepted for uploaded summary"
+                    "Accepted for uploaded summary"
                 )
-
-            # -------------------------------------------------
-            # Normal mode
-            # -------------------------------------------------
 
             else:
 
                 if distance > self.distance_threshold:
 
                     print(
-                        "❌ Rejected:"
+                        "Rejected:"
                         f" distance > "
                         f"{self.distance_threshold}"
                     )
@@ -1079,7 +1421,7 @@ class Retriever:
                     continue
 
                 print(
-                    "✅ Accepted"
+                    "Accepted"
                 )
 
             # =================================================
@@ -1098,7 +1440,7 @@ class Retriever:
             except Exception as e:
 
                 print(
-                    "⚠️ Paragraph extraction failed:"
+                    "Paragraph extraction failed:"
                 )
 
                 print(e)
@@ -1127,11 +1469,9 @@ class Retriever:
             if uploaded_summary_mode:
 
                 if len(best_paragraph) >= 500:
-
                     score += 5
 
                 if len(best_paragraph) >= 800:
-
                     score += 5
 
             score = round(
@@ -1163,24 +1503,32 @@ class Retriever:
 
             output.append({
 
-                "text": best_paragraph,
+                "text":
+                    best_paragraph,
 
-                "document": document_name,
+                "document":
+                    document_name,
 
-                "category": category,
+                "category":
+                    category,
 
-                "page": page,
+                "page":
+                    page,
 
-                "path": meta.get(
-                    "path",
-                    ""
-                ),
+                "path":
+                    meta.get(
+                        "path",
+                        ""
+                    ),
 
-                "file_id": result_file_id,
+                "file_id":
+                    result_file_id,
 
-                "distance": distance,
+                "distance":
+                    distance,
 
-                "score": score,
+                "score":
+                    score,
             })
 
         # ====================================================
@@ -1199,13 +1547,6 @@ class Retriever:
         # ====================================================
 
         if uploaded_summary_mode:
-
-            # ------------------------------------------------
-            # Summary gets more chunks.
-            #
-            # Minimum target = 10
-            # But never exceed available results.
-            # ------------------------------------------------
 
             summary_limit = min(
                 max(n_results, 10),
@@ -1231,7 +1572,7 @@ class Retriever:
         )
 
         print(
-            "✅ Relevant results returned:",
+            "Relevant results returned:",
             len(output)
         )
 

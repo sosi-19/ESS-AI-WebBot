@@ -1,6 +1,6 @@
-
 from datetime import datetime, timezone
 import json
+import re
 import time
 
 from fastapi import APIRouter, Depends
@@ -11,11 +11,15 @@ from app.schemas.chat import ChatRequest
 from app.dependencies.auth import get_current_user
 from app.models.user import User
 
-from app.services.ai_service import ask_ai, stream_ollama, is_greeting
+from app.services.ai_service import (
+    ask_ai,
+    stream_ollama,
+    is_greeting,
+    retriever,
+)
+
 from app.database.connection import get_db
 from app.services.chat_history_service import chat_history_service
-
-from app.rag.retriever import Retriever
 
 
 router = APIRouter(
@@ -25,48 +29,355 @@ router = APIRouter(
 
 
 # =========================================================
-# HELPER: BUILD PDF PROMPT
+# RESULT CLEANING / SELECTION
 # =========================================================
 
-def build_pdf_prompt(question: str, results: list) -> str:
+def normalize_text(text: str) -> str:
+    """
+    Normalize whitespace so duplicate PDF chunks can be detected.
+    """
 
-    context = "\n\n------------------------\n\n".join(
-        item["text"]
-        for item in results
+    if not text:
+        return ""
+
+    return re.sub(
+        r"\s+",
+        " ",
+        text
+    ).strip()
+
+
+def remove_duplicate_results(results: list) -> list:
+    """
+    Remove duplicate chunks based on normalized text.
+    """
+
+    unique = []
+    seen = set()
+
+    for item in results:
+
+        text = normalize_text(
+            item.get("text", "")
+        )
+
+        if not text:
+            continue
+
+        key = text.lower()
+
+        if key in seen:
+            continue
+
+        seen.add(key)
+        unique.append(item)
+
+    return unique
+
+
+def is_employment_comparison(question: str) -> bool:
+    """
+    Detect questions comparing employed and unemployed persons.
+    """
+
+    q = question.lower()
+
+    return (
+        "employed" in q
+        and "unemployed" in q
+        and (
+            "difference" in q
+            or "compare" in q
+            or "comparison" in q
+            or "between" in q
+            or "versus" in q
+            or " vs " in q
+        )
     )
 
-    prompt = f"""
-You are an Ethiopian Statistical Service assistant.
 
-Answer ONLY using the provided PDF context.
+def select_best_results(
+    question: str,
+    results: list,
+    max_results: int = 3
+) -> list:
+    """
+    Select a small but useful set of PDF chunks.
+
+    For employment comparison questions, prioritize chunks
+    containing evidence about both employed and unemployed
+    persons.
+    """
+
+    if not results:
+        return []
+
+    # -----------------------------------------------------
+    # Remove exact duplicate chunks
+    # -----------------------------------------------------
+
+    unique_results = remove_duplicate_results(
+        results
+    )
+
+    print(
+        "🧹 Results after duplicate removal:",
+        len(unique_results)
+    )
+
+    # -----------------------------------------------------
+    # Employment comparison
+    # -----------------------------------------------------
+
+    if is_employment_comparison(question):
+
+        both_terms = []
+        employed_only = []
+        unemployed_only = []
+
+        for item in unique_results:
+
+            text = normalize_text(
+                item.get("text", "")
+            )
+
+            lower_text = text.lower()
+
+            has_employed = (
+                "employed" in lower_text
+                or "employment" in lower_text
+            )
+
+            has_unemployed = (
+                "unemployed" in lower_text
+                or "unemployment" in lower_text
+            )
+
+            if has_employed and has_unemployed:
+
+                both_terms.append(item)
+
+            elif has_employed:
+
+                employed_only.append(item)
+
+            elif has_unemployed:
+
+                unemployed_only.append(item)
+
+        selected = []
+
+        # -------------------------------------------------
+        # Best case:
+        # A chunk contains BOTH concepts.
+        # -------------------------------------------------
+
+        for item in both_terms:
+
+            if item not in selected:
+                selected.append(item)
+
+            if len(selected) >= max_results:
+                break
+
+        # -------------------------------------------------
+        # Make sure employed evidence exists.
+        # -------------------------------------------------
+
+        for item in employed_only:
+
+            if len(selected) >= max_results:
+                break
+
+            if item not in selected:
+                selected.append(item)
+
+        # -------------------------------------------------
+        # Make sure unemployed evidence exists.
+        # -------------------------------------------------
+
+        for item in unemployed_only:
+
+            if len(selected) >= max_results:
+                break
+
+            if item not in selected:
+                selected.append(item)
+
+        # -------------------------------------------------
+        # Fill remaining slots using normal ranking.
+        # -------------------------------------------------
+
+        for item in unique_results:
+
+            if len(selected) >= max_results:
+                break
+
+            if item not in selected:
+                selected.append(item)
+
+        print(
+            "🎯 Employment comparison selection:",
+            len(selected)
+        )
+
+        return selected[:max_results]
+
+    # -----------------------------------------------------
+    # Normal questions
+    # -----------------------------------------------------
+
+    return unique_results[:max_results]
+
+
+# =========================================================
+# LIMIT CHUNK SIZE
+# =========================================================
+
+def limit_result_text(
+    text: str,
+    max_chars: int = 1800
+) -> str:
+    """
+    Prevent a single PDF chunk from making the prompt huge.
+    """
+
+    if not text:
+        return ""
+
+    text = text.strip()
+
+    if len(text) <= max_chars:
+        return text
+
+    return text[:max_chars] + "..."
+
+
+# =========================================================
+# BUILD PDF PROMPT
+# =========================================================
+
+def build_pdf_prompt(
+    question: str,
+    results: list
+) -> str:
+    """
+    Build a compact ESS-only prompt.
+
+    Only the selected high-quality chunks should be passed here.
+    """
+
+    context_parts = []
+
+    for index, item in enumerate(
+        results,
+        start=1
+    ):
+
+        metadata = item.get(
+            "metadata",
+            {}
+        )
+
+        filename = (
+            metadata.get("filename")
+            or metadata.get("file_name")
+            or metadata.get("source")
+            or "ESS PDF"
+        )
+
+        page = metadata.get(
+            "page",
+            "unknown"
+        )
+
+        text = limit_result_text(
+            item.get("text", ""),
+            max_chars=1800
+        )
+
+        if not text:
+            continue
+
+        context_parts.append(
+            f"[Source {index}]\n"
+            f"Document: {filename}\n"
+            f"Page: {page}\n"
+            f"Text:\n{text}"
+        )
+
+    context = "\n\n------------------------\n\n".join(
+        context_parts
+    )
+
+    # -----------------------------------------------------
+    # Special instructions for comparison questions
+    # -----------------------------------------------------
+
+    comparison_instruction = ""
+
+    if is_employment_comparison(question):
+
+        comparison_instruction = """
+For this question specifically:
+
+- Define employed persons using the ESS context.
+- Define unemployed persons using the ESS context.
+- Clearly explain the difference between them.
+- If the context provides age, work-hour, availability, job-search,
+  or labour-force criteria, include them when relevant.
+- Do not answer with only the definition of unemployed persons.
+- Do not describe employed persons as seeking employment unless
+  the ESS context explicitly says so.
+- Keep the two definitions clearly separated.
+"""
+
+    prompt = f"""
+You are an Ethiopian Statistical Service (ESS) AI assistant.
+
+Answer ONLY using the provided ESS PDF context.
 
 Rules:
 
-- If the question asks for a summary, provide the main findings of the report.
-- Include important indicators, trends, and key changes from the report.
-- Do not focus on only one table or one number.
-- If the question asks for a specific rate or value, return the exact value from the context.
-- Do not guess or use information outside the PDF context.
-- If the information is not in the context, say:
+- Do not use outside knowledge.
+- Do not guess.
+- Give a direct answer to the user's question.
+- If the question asks for a definition, give the relevant definition
+  from the ESS documents.
+- If the question asks for a comparison or difference, explain BOTH
+  concepts before explaining their difference.
+- If the question asks for a specific rate or value, return the exact
+  value found in the context.
+- If the question asks for a summary, provide the main findings,
+  important indicators, trends, and key changes.
+- If the information is not present in the context, say:
   "The information was not found in the provided ESS documents."
+- Keep the answer concise and clear.
+- Do not combine or confuse definitions from different concepts.
 
-Context:
+{comparison_instruction}
+
+ESS PDF CONTEXT:
+
 {context}
 
-Question:
+USER QUESTION:
+
 {question}
 
-Answer with only the final answer and a short explanation.
+FINAL ANSWER:
 """
 
-    return prompt
+    return prompt.strip()
 
 
 # =========================================================
-# HELPER: EXTRACT SOURCES
+# EXTRACT SOURCES
 # =========================================================
 
-def extract_sources(results: list) -> list:
+def extract_sources(
+    results: list
+) -> list:
 
     sources = []
 
@@ -91,7 +402,7 @@ def extract_sources(results: list) -> list:
 
 
 # =========================================================
-# HELPER: SAVE CHAT HISTORY
+# SAVE CHAT HISTORY
 # =========================================================
 
 def save_history(
@@ -122,9 +433,11 @@ def save_history(
         )
 
         try:
+
             db.commit()
 
         except Exception:
+
             db.rollback()
             raise
 
@@ -153,23 +466,7 @@ def save_history(
 
 
 # =========================================================
-# HELPER: NORMALIZE OLLAMA STREAM
-# =========================================================
-#
-# Ollama normally returns chunks like:
-#
-# {"model":"qwen2.5:1.5b","response":"1","done":false}
-#
-# We DO NOT want to send this directly to the frontend.
-#
-# Instead we send:
-#
-# {"response":"1","done":false}
-#
-# At the end:
-#
-# {"sources":[...],"type":"pdf","done":true}
-#
+# NORMALIZE OLLAMA STREAM
 # =========================================================
 
 def normalize_ollama_chunk(chunk):
@@ -178,7 +475,7 @@ def normalize_ollama_chunk(chunk):
         return None
 
     # -----------------------------------------------------
-    # If already a dictionary
+    # Already dictionary
     # -----------------------------------------------------
 
     if isinstance(chunk, dict):
@@ -199,10 +496,23 @@ def normalize_ollama_chunk(chunk):
         }
 
     # -----------------------------------------------------
-    # Convert to string
+    # Convert bytes/string
     # -----------------------------------------------------
 
-    if not isinstance(chunk, str):
+    if isinstance(chunk, bytes):
+
+        try:
+
+            chunk = chunk.decode(
+                "utf-8"
+            )
+
+        except Exception:
+
+            chunk = str(chunk)
+
+    elif not isinstance(chunk, str):
+
         chunk = str(chunk)
 
     chunk = chunk.strip()
@@ -211,12 +521,14 @@ def normalize_ollama_chunk(chunk):
         return None
 
     # -----------------------------------------------------
-    # Try to parse JSON returned by Ollama
+    # JSON
     # -----------------------------------------------------
 
     try:
 
-        parsed = json.loads(chunk)
+        parsed = json.loads(
+            chunk
+        )
 
         if isinstance(parsed, dict):
 
@@ -237,14 +549,10 @@ def normalize_ollama_chunk(chunk):
 
     except json.JSONDecodeError:
 
-        # -------------------------------------------------
-        # If stream_ollama already returns plain text
-        # -------------------------------------------------
-
         pass
 
     # -----------------------------------------------------
-    # Raw text fallback
+    # Plain text fallback
     # -----------------------------------------------------
 
     return {
@@ -254,25 +562,21 @@ def normalize_ollama_chunk(chunk):
 
 
 # =========================================================
-# HELPER: STREAM AI RESPONSE
+# STREAM AI RESPONSE
 # =========================================================
 
-def stream_clean_response(prompt: str):
+def stream_clean_response(
+    prompt: str
+):
 
     """
-    Reads the raw Ollama stream and converts it into
-    clean ESS AI JSON chunks.
-
-    Example input:
-
-        {"model":"qwen2.5:1.5b","response":"13","done":false}
-
-    Example output:
-
-        {"response":"13","done":false}
+    Reads raw Ollama streaming output and returns
+    clean NDJSON-compatible chunks.
     """
 
-    for raw_chunk in stream_ollama(prompt):
+    for raw_chunk in stream_ollama(
+        prompt
+    ):
 
         parsed = normalize_ollama_chunk(
             raw_chunk
@@ -281,7 +585,6 @@ def stream_clean_response(prompt: str):
         if parsed is None:
             continue
 
-        # Do not forward Ollama's internal metadata.
         if parsed.get("done") is True:
             continue
 
@@ -383,10 +686,17 @@ def public_chat_stream(
     # GREETING
     # =====================================================
 
-    if is_greeting(request.message):
+    if is_greeting(
+        request.message
+    ):
 
-        print("👋 Greeting detected.")
-        print("🚫 RAG search skipped.")
+        print(
+            "👋 Greeting detected."
+        )
+
+        print(
+            "🚫 RAG search skipped."
+        )
 
         def greeting_response():
 
@@ -415,10 +725,16 @@ def public_chat_stream(
         )
 
     # =====================================================
-    # RETRIEVER
+    # IMPORTANT:
+    # DO NOT CREATE Retriever() HERE
+    #
+    # We use the singleton retriever imported from
+    # app.services.ai_service.
     # =====================================================
 
-    retriever = Retriever()
+    print(
+        "♻️ Using shared ESS Retriever instance"
+    )
 
     # =====================================================
     # PDF RETRIEVAL
@@ -426,7 +742,7 @@ def public_chat_stream(
 
     pdf_start = time.time()
 
-    results = retriever.search(
+    raw_results = retriever.search(
         request.message,
         file_id=request.file_id
     )
@@ -442,11 +758,16 @@ def public_chat_stream(
         "seconds"
     )
 
+    print(
+        "Raw retrieval results:",
+        len(raw_results)
+    )
+
     # =====================================================
     # NO RESULTS
     # =====================================================
 
-    if not results:
+    if not raw_results:
 
         print(
             "❌ No PDF results found"
@@ -470,10 +791,80 @@ def public_chat_stream(
         )
 
     # =====================================================
-    # BUILD PROMPT
+    # SELECT BEST RESULTS
     # =====================================================
 
     question = request.message.strip()
+
+    results = select_best_results(
+        question,
+        raw_results,
+        max_results=3
+    )
+
+    print(
+        "🎯 Final chunks selected:",
+        len(results)
+    )
+
+    # =====================================================
+    # SHOW SELECTED EVIDENCE
+    # =====================================================
+
+    print("\n" + "=" * 70)
+    print("📚 SELECTED PDF EVIDENCE")
+    print("=" * 70)
+
+    for index, item in enumerate(
+        results,
+        start=1
+    ):
+
+        metadata = item.get(
+            "metadata",
+            {}
+        )
+
+        filename = (
+            metadata.get("filename")
+            or metadata.get("file_name")
+            or metadata.get("source")
+            or "ESS PDF"
+        )
+
+        page = metadata.get(
+            "page",
+            "unknown"
+        )
+
+        text = normalize_text(
+            item.get("text", "")
+        )
+
+        print(
+            f"\nChunk #{index}"
+        )
+
+        print(
+            "Document:",
+            filename
+        )
+
+        print(
+            "Page:",
+            page
+        )
+
+        print(
+            "Text:",
+            text[:500]
+        )
+
+    print("=" * 70)
+
+    # =====================================================
+    # BUILD PROMPT
+    # =====================================================
 
     prompt = build_pdf_prompt(
         question,
@@ -510,15 +901,22 @@ def public_chat_stream(
                 "🌊 Public stream started"
             )
 
-            # ---------------------------------------------
-            # STREAM CLEAN AI RESPONSE
-            # ---------------------------------------------
+            ollama_start = time.time()
 
             for chunk in stream_clean_response(
                 prompt
             ):
 
                 yield chunk + "\n"
+
+            print(
+                "🤖 Ollama generation time:",
+                round(
+                    time.time() - ollama_start,
+                    2
+                ),
+                "seconds"
+            )
 
             # ---------------------------------------------
             # FINAL MESSAGE
@@ -614,7 +1012,9 @@ def authenticated_chat_stream(
     # GREETING
     # =====================================================
 
-    if is_greeting(request.message):
+    if is_greeting(
+        request.message
+    ):
 
         print(
             "👋 Greeting detected."
@@ -661,10 +1061,13 @@ def authenticated_chat_stream(
         )
 
     # =====================================================
-    # RETRIEVER
+    # IMPORTANT:
+    # USE SHARED RETRIEVER
     # =====================================================
 
-    retriever = Retriever()
+    print(
+        "♻️ Using shared ESS Retriever instance"
+    )
 
     # =====================================================
     # PDF RETRIEVAL
@@ -672,7 +1075,7 @@ def authenticated_chat_stream(
 
     pdf_start = time.time()
 
-    results = retriever.search(
+    raw_results = retriever.search(
         request.message,
         file_id=request.file_id
     )
@@ -688,11 +1091,16 @@ def authenticated_chat_stream(
         "seconds"
     )
 
+    print(
+        "Raw retrieval results:",
+        len(raw_results)
+    )
+
     # =====================================================
     # NO RESULTS
     # =====================================================
 
-    if not results:
+    if not raw_results:
 
         answer = (
             "The information was not found "
@@ -726,10 +1134,80 @@ def authenticated_chat_stream(
         )
 
     # =====================================================
-    # BUILD PROMPT
+    # SELECT BEST RESULTS
     # =====================================================
 
     question = request.message.strip()
+
+    results = select_best_results(
+        question,
+        raw_results,
+        max_results=3
+    )
+
+    print(
+        "🎯 Final chunks selected:",
+        len(results)
+    )
+
+    # =====================================================
+    # SHOW SELECTED EVIDENCE
+    # =====================================================
+
+    print("\n" + "=" * 70)
+    print("📚 SELECTED PDF EVIDENCE")
+    print("=" * 70)
+
+    for index, item in enumerate(
+        results,
+        start=1
+    ):
+
+        metadata = item.get(
+            "metadata",
+            {}
+        )
+
+        filename = (
+            metadata.get("filename")
+            or metadata.get("file_name")
+            or metadata.get("source")
+            or "ESS PDF"
+        )
+
+        page = metadata.get(
+            "page",
+            "unknown"
+        )
+
+        text = normalize_text(
+            item.get("text", "")
+        )
+
+        print(
+            f"\nChunk #{index}"
+        )
+
+        print(
+            "Document:",
+            filename
+        )
+
+        print(
+            "Page:",
+            page
+        )
+
+        print(
+            "Text:",
+            text[:500]
+        )
+
+    print("=" * 70)
+
+    # =====================================================
+    # BUILD PROMPT
+    # =====================================================
 
     prompt = build_pdf_prompt(
         question,
@@ -768,6 +1246,8 @@ def authenticated_chat_stream(
                 "\n🌊 Authenticated stream started"
             )
 
+            ollama_start = time.time()
+
             # ---------------------------------------------
             # STREAM AI
             # ---------------------------------------------
@@ -776,12 +1256,7 @@ def authenticated_chat_stream(
                 prompt
             ):
 
-                # Send clean chunk to frontend
                 yield chunk + "\n"
-
-                # -----------------------------------------
-                # SAVE RESPONSE TEXT
-                # -----------------------------------------
 
                 try:
 
@@ -807,6 +1282,15 @@ def authenticated_chat_stream(
                 ):
 
                     pass
+
+            print(
+                "🤖 Ollama generation time:",
+                round(
+                    time.time() - ollama_start,
+                    2
+                ),
+                "seconds"
+            )
 
             # =================================================
             # FALLBACK

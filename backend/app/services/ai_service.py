@@ -1,15 +1,25 @@
+# ============================================================
+# ESS AI SERVICE
+# ============================================================
 
 import os
+import re
 import time
 import requests
+from typing import Optional
+
+from dotenv import load_dotenv
 
 from app.rag.retriever import Retriever
 from app.services.csv_ai_service import csv_ai_service
 
 
 # ============================================================
-# OLLAMA CONFIGURATION
+# ENVIRONMENT
 # ============================================================
+
+load_dotenv()
+
 
 OLLAMA_URL = os.getenv(
     "OLLAMA_URL",
@@ -30,7 +40,7 @@ retriever = Retriever()
 
 
 # ============================================================
-# AI RESPONSE CACHE
+# CACHE
 # ============================================================
 
 AI_CACHE = {}
@@ -39,425 +49,623 @@ CACHE_TTL = 3600
 CACHE_MAX_SIZE = 100
 
 
-# ============================================================
-# NORMALIZE QUESTION
-# ============================================================
-
-def normalize_question(message: str) -> str:
+def normalize_question(question: str) -> str:
     """
-    Normalize a user question for comparison/cache purposes.
+    Normalize a question for cache lookup.
     """
 
-    if not message:
+    if not question:
         return ""
 
-    return " ".join(
-        message.lower().strip().split()
-    )
+    question = question.lower().strip()
 
+    question = re.sub(r"\s+", " ", question)
 
-# ============================================================
-# CACHE KEY
-# ============================================================
+    question = question.strip(" ?!.,:")
+
+    return question
+
 
 def make_cache_key(
-    message: str,
-    file_id: str | None = None
-):
-    """
-    Create a cache key.
+    question: str,
+    file_id: Optional[str] = None
+) -> str:
 
-    Uploaded PDF questions are isolated by file_id.
-    """
+    normalized = normalize_question(question)
 
-    question = normalize_question(message)
-
-    if file_id:
-        return f"FILE:{file_id}::{question}"
-
-    return f"ESS::{question}"
+    return f"{file_id or 'global'}::{normalized}"
 
 
-# ============================================================
-# CACHE GET
-# ============================================================
-
-def get_cached_response(
-    message: str,
-    file_id: str | None = None
+def get_cached_answer(
+    question: str,
+    file_id: Optional[str] = None
 ):
 
-    key = make_cache_key(
-        message,
-        file_id
-    )
+    key = make_cache_key(question, file_id)
 
-    cached = AI_CACHE.get(key)
+    item = AI_CACHE.get(key)
 
-    if cached is None:
+    if not item:
         return None
 
-    # Check expiration
-    if (
-        time.time()
-        - cached["timestamp"]
-        > CACHE_TTL
-    ):
+    timestamp, value = item
 
-        del AI_CACHE[key]
+    if time.time() - timestamp > CACHE_TTL:
 
-        print("🗑️ Cache expired")
+        try:
+            del AI_CACHE[key]
+        except KeyError:
+            pass
 
         return None
 
-    print("⚡ CACHE HIT")
-
-    return cached["result"]
+    return value
 
 
-# ============================================================
-# CACHE SAVE
-# ============================================================
-
-def save_cached_response(
-    message: str,
-    result: dict,
-    file_id: str | None = None
+def save_cached_answer(
+    question: str,
+    answer,
+    file_id: Optional[str] = None
 ):
 
-    key = make_cache_key(
-        message,
-        file_id
-    )
-
-    # Remove oldest item if cache is full
     if len(AI_CACHE) >= CACHE_MAX_SIZE:
 
-        oldest_key = next(
-            iter(AI_CACHE)
+        oldest_key = min(
+            AI_CACHE,
+            key=lambda k: AI_CACHE[k][0]
         )
 
-        del AI_CACHE[oldest_key]
+        try:
+            del AI_CACHE[oldest_key]
+        except KeyError:
+            pass
 
-    AI_CACHE[key] = {
+    key = make_cache_key(question, file_id)
 
-        "result": result,
-
-        "timestamp": time.time()
-
-    }
-
-    print("💾 Response saved to cache")
-
-
-# ============================================================
-# GREETING DETECTION
-# ============================================================
-
-def is_greeting(question: str):
-
-    question = normalize_question(
-        question
+    AI_CACHE[key] = (
+        time.time(),
+        answer
     )
 
-    greetings = {
 
+# ============================================================
+# GREETING
+# ============================================================
+
+def is_greeting(question: str) -> bool:
+
+    if not question:
+        return False
+
+    text = question.lower().strip()
+
+    greetings = {
         "hi",
         "hello",
         "hey",
         "hiya",
-        "hey there",
-        "hello there",
-
+        "howdy",
         "good morning",
         "good afternoon",
         "good evening",
-
+        "morning",
+        "afternoon",
+        "evening",
         "selam",
         "salam",
-
+        "እንደምን አለህ",
+        "እንደምን አለሽ",
         "ሰላም",
-        "ሀይ",
-        "ሃይ",
-        "ሂ"
-
     }
 
-    return question in greetings
+    if text in greetings:
+        return True
+
+    return False
+
+
+def greeting_response() -> str:
+
+    return (
+        "Welcome to the Ethiopia Statistical Service (ESS) "
+        "AI Assistant. How can I help you today?"
+    )
 
 
 # ============================================================
-# GREETING RESPONSE
+# QUESTION INTENT
 # ============================================================
 
-def greeting_response():
+def detect_question_intent(question: str) -> str:
 
-    return {
+    if not question:
+        return "general"
 
-        "answer": (
-            "Hello! 👋 Welcome to the "
-            "Ethiopia Statistical Service (ESS) AI Assistant. "
-            "How can I help you today?"
-        ),
+    text = question.lower()
 
-        "sources": [],
+    # --------------------------------------------------------
+    # Definition / comparison questions
+    # --------------------------------------------------------
 
-        "type": "greeting"
+    definition_words = [
+        "definition",
+        "define",
+        "what is",
+        "what are",
+        "meaning of",
+        "means",
+        "difference between",
+        "difference",
+        "distinguish",
+        "distinction",
+        "compare",
+        "comparison",
+    ]
 
-    }
+    if any(word in text for word in definition_words):
+
+        return "definition"
+
+    # --------------------------------------------------------
+    # Summary
+    # --------------------------------------------------------
+
+    summary_words = [
+        "summarize",
+        "summary",
+        "main findings",
+        "key findings",
+        "overview",
+        "highlights",
+        "main points",
+    ]
+
+    if any(word in text for word in summary_words):
+
+        return "summary"
+
+    # --------------------------------------------------------
+    # Rate / percentage
+    # --------------------------------------------------------
+
+    rate_words = [
+        "rate",
+        "percentage",
+        "percent",
+        "%",
+        "proportion",
+        "share",
+    ]
+
+    if any(word in text for word in rate_words):
+
+        return "value"
+
+    # --------------------------------------------------------
+    # Count
+    # --------------------------------------------------------
+
+    count_words = [
+        "how many",
+        "number of",
+        "count",
+        "total number",
+    ]
+
+    if any(word in text for word in count_words):
+
+        return "count"
+
+    # --------------------------------------------------------
+    # Trend
+    # --------------------------------------------------------
+
+    trend_words = [
+        "trend",
+        "increase",
+        "decrease",
+        "increased",
+        "decreased",
+        "change",
+        "changed",
+        "growth",
+        "decline",
+        "over time",
+    ]
+
+    if any(word in text for word in trend_words):
+
+        return "trend"
+
+    return "general"
 
 
 # ============================================================
 # SOURCE DETECTION
 # ============================================================
 
-def detect_source(question: str):
+def detect_source(question: str) -> str:
 
-    question = normalize_question(
-        question
-    )
+    if not question:
+        return "pdf"
 
-    # --------------------------------------------------------
-    # CSV DATASET SIGNALS
-    # --------------------------------------------------------
+    text = question.lower()
 
-    csv_dataset_keywords = [
-
-        "dataset",
-        "datasets",
+    csv_keywords = [
         "csv",
-        "record",
-        "records",
-        "row",
-        "rows",
+        "dataset",
+        "data set",
         "column",
-        "columns",
-
-        "agriculture dataset",
-        "education dataset",
-        "health dataset",
-        "roster dataset"
-
-    ]
-
-    # --------------------------------------------------------
-    # CSV OPERATION SIGNALS
-    # --------------------------------------------------------
-
-    csv_operation_keywords = [
-
+        "row",
         "average",
         "mean",
+        "median",
         "maximum",
         "minimum",
         "max",
         "min",
-        "median",
-        "unique",
-
         "standard deviation",
         "variance",
         "quartile",
         "percentile",
-        "correlation"
-
+        "correlation",
+        "unique values",
     ]
 
-    # --------------------------------------------------------
-    # PDF SIGNALS
-    # --------------------------------------------------------
+    if any(keyword in text for keyword in csv_keywords):
+
+        return "csv"
 
     pdf_keywords = [
-
         "report",
-        "reports",
-
         "survey",
-        "surveys",
-
+        "publication",
         "document",
-        "documents",
-
         "pdf",
-
         "according to",
-        "according",
-
-        "findings",
-        "key findings",
-
+        "according to the report",
         "statistical report",
-        "study",
-
-        "summarize",
-        "summarise",
-        "summary",
-
-        "overview",
-        "main points",
-        "key points"
-
+        "key findings",
+        "inflation",
+        "employment",
+        "unemployment",
+        "employed",
+        "unemployed",
+        "labour",
+        "labor",
+        "population",
+        "census",
+        "price",
+        "consumer price",
     ]
 
-    has_csv_dataset_signal = any(
-        keyword in question
-        for keyword in csv_dataset_keywords
-    )
+    if any(keyword in text for keyword in pdf_keywords):
 
-    has_csv_operation_signal = any(
-        keyword in question
-        for keyword in csv_operation_keywords
-    )
+        return "pdf"
 
-    has_pdf_signal = any(
-        keyword in question
-        for keyword in pdf_keywords
-    )
-
-    csv_dataset_names = [
-
-        "agriculture",
-        "education",
-        "health",
-        "roster"
-
-    ]
-
-    has_csv_dataset_name = any(
-        dataset in question
-        for dataset in csv_dataset_names
-    )
-
-    return {
-
-        "csv_dataset":
-            has_csv_dataset_signal,
-
-        "csv_operation":
-            has_csv_operation_signal,
-
-        "csv_name":
-            has_csv_dataset_name,
-
-        "pdf":
-            has_pdf_signal
-
-    }
+    return "pdf"
 
 
 # ============================================================
-# BUILD PDF CONTEXT
+# RETRIEVAL QUERY
 # ============================================================
 
-def build_pdf_context(results):
+def build_retrieval_query(question: str) -> str:
+    """
+    Improve semantic retrieval without changing the user's
+    actual question.
+
+    This query is ONLY used for searching Chroma.
+
+    The model still answers using the retrieved ESS evidence.
+    """
+
+    if not question:
+        return question
+
+    text = question.lower()
+
+    additions = []
+
+    # --------------------------------------------------------
+    # Employment definitions
+    # --------------------------------------------------------
+
+    if (
+        "employed" in text
+        or "unemployed" in text
+        or "employment" in text
+        or "unemployment" in text
+    ):
+
+        additions.extend([
+            "employment status",
+            "employed persons definition",
+            "unemployed persons definition",
+            "employed population",
+            "unemployed population",
+            "labour force",
+            "labor force",
+            "ESS definition",
+        ])
+
+    # --------------------------------------------------------
+    # Explicit comparison questions
+    # --------------------------------------------------------
+
+    if (
+        "difference between" in text
+        or "compare" in text
+        or "comparison" in text
+        or "distinguish" in text
+    ):
+
+        additions.extend([
+            "definition of first concept",
+            "definition of second concept",
+            "statistical definition",
+            "employment status classification",
+        ])
+
+    # --------------------------------------------------------
+    # Labour force
+    # --------------------------------------------------------
+
+    if (
+        "labour force" in text
+        or "labor force" in text
+    ):
+
+        additions.extend([
+            "labour force definition",
+            "labor force definition",
+            "employment status",
+            "unemployment definition",
+        ])
+
+    # --------------------------------------------------------
+    # Inflation
+    # --------------------------------------------------------
+
+    if (
+        "inflation" in text
+        or "inflation rate" in text
+    ):
+
+        additions.extend([
+            "inflation rate",
+            "consumer price index",
+            "CPI",
+        ])
+
+    # --------------------------------------------------------
+    # Don't make the query unnecessarily huge
+    # --------------------------------------------------------
+
+    if not additions:
+
+        return question
+
+    return question + " " + " ".join(additions)
+
+
+# ============================================================
+# REMOVE DUPLICATE RESULTS
+# ============================================================
+
+def remove_duplicate_results(results):
+    """
+    Remove identical or nearly identical PDF chunks.
+
+    This is important because the same ESS PDF may have been
+    uploaded/indexed multiple times under different file_ids.
+    """
+
+    if not results:
+        return []
+
+    unique_results = []
+
+    seen_text = set()
+
+    for result in results:
+
+        text = result.get(
+            "text",
+            result.get(
+                "content",
+                ""
+            )
+        )
+
+        if not text:
+            continue
+
+        # Normalize whitespace
+        normalized = " ".join(
+            text.strip().split()
+        )
+
+        if not normalized:
+            continue
+
+        # Skip exact duplicate chunks
+        if normalized in seen_text:
+            continue
+
+        seen_text.add(normalized)
+
+        unique_results.append(result)
+
+    return unique_results
+
+
+# ============================================================
+# LIMIT RESULT TEXT
+# ============================================================
+
+def limit_result_text(
+    text: str,
+    max_chars: int = 1800
+) -> str:
+    """
+    Prevent very large PDF chunks from being sent to Ollama.
+    """
+
+    if not text:
+        return ""
+
+    text = text.strip()
+
+    if len(text) <= max_chars:
+        return text
+
+    return text[:max_chars].rstrip() + "..."
+
+
+# ============================================================
+# PDF CONTEXT
+# ============================================================
+
+def build_pdf_context(results) -> str:
+
+    if not results:
+        return ""
 
     context_parts = []
 
-    for index, item in enumerate(
+    for index, result in enumerate(
         results,
         start=1
     ):
 
-        document = item.get(
+        metadata = result.get(
+            "metadata",
+            {}
+        )
+
+        document = metadata.get(
             "document",
-            "Unknown document"
+            metadata.get(
+                "filename",
+                "Unknown document"
+            )
         )
 
-        category = item.get(
-            "category",
-            "PDF"
-        )
-
-        page = item.get(
+        page = metadata.get(
             "page",
-            "Unknown"
+            metadata.get(
+                "page_number",
+                "Unknown"
+            )
         )
 
-        text = item.get(
+        category = metadata.get(
+            "category",
+            "ESS document"
+        )
+
+        text = result.get(
             "text",
-            ""
+            result.get(
+                "content",
+                ""
+            )
         )
 
-        if not text or not text.strip():
+        if not text:
             continue
 
-        context_parts.append(
-
-            f"Evidence {index}\n"
-            f"Document: {document}\n"
-            f"Category: {category}\n"
-            f"Page: {page}\n"
-            f"Content:\n{text}"
-
+        # Limit chunk size
+        text = limit_result_text(
+            text,
+            max_chars=1800
         )
 
-    return "\n\n========================\n\n".join(
+        context_parts.append(
+            f"""
+--- EVIDENCE {index} ---
+Document: {document}
+Category: {category}
+Page: {page}
+
+{text}
+""".strip()
+        )
+
+    return "\n\n".join(
         context_parts
     )
 
 
 # ============================================================
-# BUILD PDF SOURCES
+# PDF SOURCES
 # ============================================================
 
 def build_pdf_sources(results):
 
     sources = []
 
+    if not results:
+        return sources
+
     seen = set()
 
-    for item in results:
+    for result in results:
 
-        document = item.get(
-            "document"
+        metadata = result.get(
+            "metadata",
+            {}
         )
 
-        if not document:
-            continue
-
-        page = item.get(
-            "page"
-        )
-
-        source_key = (
-            document,
-            page
-        )
-
-        if source_key in seen:
-            continue
-
-        source = {
-
-            "document":
-                document,
-
-            "category":
-                item.get(
-                    "category",
-                    "PDF"
-                ),
-
-            "page":
-                page
-
-        }
-
-        if item.get("file_id"):
-
-            source["file_id"] = item.get(
-                "file_id"
+        document = metadata.get(
+            "document",
+            metadata.get(
+                "filename",
+                "Unknown document"
             )
-
-        sources.append(
-            source
         )
 
-        seen.add(
-            source_key
+        page = metadata.get(
+            "page",
+            metadata.get(
+                "page_number",
+                None
+            )
         )
+
+        key = (
+            str(document),
+            str(page)
+        )
+
+        if key in seen:
+            continue
+
+        seen.add(key)
+
+        sources.append({
+            "document": document,
+            "page": page,
+            "category": metadata.get(
+                "category",
+                None
+            )
+        })
 
     return sources
+
+
+# ============================================================
+# NO PDF INFORMATION
+# ============================================================
+
+def no_pdf_information_response():
+
+    return (
+        "The requested information was not found in the "
+        "provided ESS documents."
+    )
 
 
 # ============================================================
@@ -465,99 +673,212 @@ def build_pdf_sources(results):
 # ============================================================
 
 def build_pdf_prompt(
-    message: str,
-    context: str,
-    uploaded: bool = False
-):
+    question: str,
+    context: str
+) -> str:
 
-    if uploaded:
+    intent = detect_question_intent(
+        question
+    )
 
-        source_description = (
-            "The evidence below comes ONLY from "
-            "the PDF uploaded by the user."
-        )
+    # ========================================================
+    # DEFINITION / COMPARISON
+    # ========================================================
 
-        missing_message = (
-            "The information was not found in the uploaded PDF."
-        )
+    if intent == "definition":
+
+        task = """
+This is a DEFINITION or COMPARISON question.
+
+Use the ESS evidence to answer the question.
+
+If the user asks for the difference between two concepts:
+
+1. Identify the ESS definition of the FIRST concept.
+2. Identify the ESS definition of the SECOND concept.
+3. Explain BOTH concepts.
+4. Clearly explain the difference between them.
+5. Preserve important ESS conditions, thresholds,
+   classifications, age requirements, time periods,
+   or other criteria.
+6. Do not replace an ESS statistical definition with
+   a generic textbook definition.
+7. Do not use outside knowledge.
+8. Do not invent missing information.
+9. If only one concept is supported by the evidence,
+   clearly say that the available evidence only supports
+   that concept instead of inventing the other definition.
+
+For employment questions, specifically look for:
+- employed persons
+- unemployed persons
+- employment status
+- labour force
+- statistical definitions
+"""
+    
+    # ========================================================
+    # SUMMARY
+    # ========================================================
+
+    elif intent == "summary":
+
+        task = """
+This is a SUMMARY question.
+
+Use ONLY the supplied ESS evidence.
+
+Provide the main findings relevant to the question.
+
+Include important indicators, trends, classifications,
+and key changes when they are present.
+
+Do not focus on one isolated number when the user asks
+for a summary.
+"""
+
+    # ========================================================
+    # EXACT VALUE
+    # ========================================================
+
+    elif intent == "value":
+
+        task = """
+This question asks for a statistical value, rate,
+percentage, proportion, or similar indicator.
+
+Use ONLY the supplied ESS evidence.
+
+Return the exact value appearing in the evidence.
+
+Be careful about:
+
+- year
+- month
+- survey round
+- geographic area
+- population group
+- numerator
+- denominator
+- unit
+- percentage versus percentage points
+
+Do not calculate or guess a value unless the evidence
+clearly provides the required information.
+"""
+
+    # ========================================================
+    # COUNT
+    # ========================================================
+
+    elif intent == "count":
+
+        task = """
+This question asks for a count or number.
+
+Use ONLY the supplied ESS evidence.
+
+Return the exact number from the relevant evidence.
+
+Do not substitute a percentage for a count.
+
+Pay attention to the population, year, survey round,
+geographic area, and unit.
+"""
+
+    # ========================================================
+    # TREND
+    # ========================================================
+
+    elif intent == "trend":
+
+        task = """
+This is a trend or change question.
+
+Use ONLY the supplied ESS evidence.
+
+Explain the direction and magnitude of change when the
+evidence provides it.
+
+Do not infer a trend that is not supported by the evidence.
+"""
+
+    # ========================================================
+    # GENERAL
+    # ========================================================
 
     else:
 
-        source_description = (
-            "The evidence below comes from "
-            "ESS PDF documents."
-        )
+        task = """
+Answer the question using ONLY the ESS evidence below.
 
-        missing_message = (
-            "The information was not found in "
-            "the provided ESS documents."
-        )
+Do not use outside knowledge.
 
-    return f"""
+If the evidence does not contain enough information to
+answer the question, say:
+
+"The requested information was not found in the provided
+ESS documents."
+
+Do not guess.
+"""
+
+    # ========================================================
+    # FINAL PROMPT
+    # ========================================================
+
+    prompt = f"""
 You are the Ethiopia Statistical Service (ESS) AI Assistant.
 
-{source_description}
+You are answering a question using retrieved ESS statistical
+documents.
 
-Your task is to answer the user's question using ONLY
-the PDF evidence provided below.
+IMPORTANT:
+This is an evidence-based question answering task.
 
-IMPORTANT RULES:
+The retrieved evidence is the ONLY authoritative source
+for your answer.
 
-1. Never use outside knowledge.
-2. Never invent numbers, percentages, dates, names,
-   locations, or statistics.
-3. Never guess missing information.
-4. If the user asks for a specific value, return the
-   exact value found in the evidence.
-5. If the user asks for a summary, summarize the important
-   findings across the useful evidence.
-6. For summaries, include important indicators, trends,
-   increases, decreases, comparisons, and major findings.
-7. Do not focus on only one table when several pieces of
-   evidence are relevant.
-8. Combine related evidence from multiple pages when useful.
-9. Preserve the exact year and month.
-10. Pay special attention to Ethiopian Fiscal Year (EFY).
-11. Do not mix values from different periods.
-12. If a value is explicitly stated in the evidence,
-    use that exact value.
-13. If useful, mention the page number.
-14. Do not describe the retrieval process.
-15. Do not mention RAG, embeddings, chunks, Chroma,
-    vector databases, or Ollama.
-16. Keep the answer clear and professional.
-17. If the requested information is not present, say:
+Do NOT answer from your general knowledge or training data.
 
-"{missing_message}"
+{task}
 
-18. For a summary, do not return the missing-information
-    message simply because one small detail is absent.
-19. Do not create information to make the answer longer.
-20. If the evidence contains a table, carefully read the
-    table before answering.
-21. If several values appear, select the value that directly
-    matches the user's requested indicator and period.
-22. Never substitute a nearby month, year, or different
-    inflation measure.
-23. If the question asks "What was Ethiopia's inflation
-    rate", clearly state the inflation rate and period.
+Additional rules:
 
-============================================================
-PDF EVIDENCE
-============================================================
-
-{context}
+- Use ESS terminology.
+- Do not invent facts.
+- Do not hallucinate.
+- Do not mix information from unrelated years or surveys.
+- Do not assume two statistics are comparable unless the
+  evidence supports the comparison.
+- If the evidence contains a definition, follow that definition.
+- If the evidence contains conditions or criteria, preserve them.
+- If the evidence contains an exact number, preserve the number.
+- Keep the answer concise but complete.
+- Mention the document/page when useful.
+- Never claim that something appears in the evidence when it
+  does not.
 
 ============================================================
 USER QUESTION
 ============================================================
 
-{message}
+{question}
+
+============================================================
+ESS EVIDENCE
+============================================================
+
+{context}
 
 ============================================================
 ANSWER
 ============================================================
-"""
+
+Answer directly from the ESS evidence.
+""".strip()
+
+    return prompt
 
 
 # ============================================================
@@ -565,41 +886,29 @@ ANSWER
 # ============================================================
 
 def build_hybrid_prompt(
-    message: str,
-    csv_answer: str,
-    pdf_context: str
-):
+    question: str,
+    pdf_context: str,
+    csv_context: str = ""
+) -> str:
 
     return f"""
 You are the Ethiopia Statistical Service (ESS) AI Assistant.
 
-Answer the user's question using ONLY the CSV result
-and the retrieved ESS PDF evidence below.
+Answer the user's question using the supplied ESS information.
 
-IMPORTANT RULES:
+IMPORTANT:
 
-1. Never use outside knowledge.
-2. Never invent statistics.
-3. Never guess missing values.
-4. Clearly distinguish CSV information from PDF information.
-5. Pay attention to:
-   - year
-   - EFY
-   - survey round
-   - sex
-   - age group
-   - geographic scope
-   - indicator
-6. If CSV and PDF contain different values,
-   explain the difference.
-7. Use exact values from the evidence.
-8. Keep the answer concise and professional.
+- Use the supplied evidence.
+- Do not invent information.
+- Do not use generic definitions when an ESS definition is
+  available.
+- Do not mix unrelated datasets or reports.
+- Preserve exact statistical values.
+- If the information is not available, say so.
 
-============================================================
-CSV RESULT
-============================================================
+USER QUESTION:
 
-{csv_answer}
+{question}
 
 ============================================================
 PDF EVIDENCE
@@ -608,175 +917,77 @@ PDF EVIDENCE
 {pdf_context}
 
 ============================================================
-USER QUESTION
+CSV / DATA EVIDENCE
 ============================================================
 
-{message}
+{csv_context}
 
 ============================================================
 ANSWER
 ============================================================
-"""
+""".strip()
 
 
 # ============================================================
-# EMPTY PDF RESPONSE
+# OLLAMA OPTIONS
 # ============================================================
 
-def no_pdf_information_response(
-    uploaded: bool = False
-):
+OLLAMA_OPTIONS = {
+    "temperature": 0.0,
+    "num_predict": 300,
 
-    if uploaded:
+    # Reduced from 4096 to reduce prompt processing time
+    "num_ctx": 2048,
 
-        return (
-            "The information was not found "
-            "in the uploaded PDF."
-        )
+    "top_k": 10,
+    "top_p": 0.5,
 
-    return (
-        "The information was not found "
-        "in the provided ESS documents."
-    )
+    # Keep the model loaded
+    "keep_alive": "30m",
+}
 
 
 # ============================================================
-# OLLAMA NORMAL RESPONSE
+# OLLAMA NON-STREAMING
 # ============================================================
 
-def ask_ollama(prompt: str):
-
-    start_time = time.time()
+def ask_ollama(prompt: str) -> str:
 
     payload = {
-
         "model": MODEL,
-
         "prompt": prompt,
-
         "stream": False,
-
-        "keep_alive": "30m",
-
-        "options": {
-
-            "temperature": 0.0,
-
-            "num_predict": 300,
-
-            "num_ctx": 4096,
-
-            "top_k": 10,
-
-            "top_p": 0.5
-
-        }
-
+        "options": OLLAMA_OPTIONS,
     }
-
-    print(
-        "\nPROMPT CHARACTERS:",
-        len(prompt)
-    )
 
     try:
 
         response = requests.post(
-
             OLLAMA_URL,
-
             json=payload,
-
-            timeout=120
-
+            timeout=180
         )
 
         response.raise_for_status()
 
         data = response.json()
 
-    except requests.exceptions.ConnectionError:
+        answer = data.get(
+            "response",
+            ""
+        )
+
+        return answer.strip()
+
+    except Exception as exc:
 
         print(
-            "❌ Could not connect to Ollama."
+            f"Ollama request failed: {exc}"
         )
 
         return (
-            "The AI service is currently unavailable. "
-            "Please make sure Ollama is running."
+            "I was unable to generate an answer at this time."
         )
-
-    except requests.exceptions.Timeout:
-
-        print(
-            "❌ Ollama request timed out."
-        )
-
-        return (
-            "The AI response took too long. "
-            "Please try again."
-        )
-
-    except requests.exceptions.RequestException as e:
-
-        print(
-            "❌ Ollama request failed:",
-            e
-        )
-
-        return (
-            "The AI service encountered an error. "
-            "Please try again."
-        )
-
-    except Exception as e:
-
-        print(
-            "❌ Unexpected Ollama error:",
-            e
-        )
-
-        return (
-            "The AI service encountered an "
-            "unexpected error."
-        )
-
-    answer = data.get(
-        "response",
-        ""
-    )
-
-    print(
-        "Ollama total duration:",
-        data.get(
-            "total_duration",
-            0
-        ) / 1_000_000_000,
-        "seconds"
-    )
-
-    print(
-        "Ollama prompt tokens:",
-        data.get(
-            "prompt_eval_count",
-            0
-        )
-    )
-
-    print(
-        "Ollama generated tokens:",
-        data.get(
-            "eval_count",
-            0
-        )
-    )
-
-    print(
-        f"🤖 Python request time: "
-        f"{time.time() - start_time:.2f} seconds"
-    )
-
-    return answer.strip()
 
 
 # ============================================================
@@ -786,165 +997,79 @@ def ask_ollama(prompt: str):
 def stream_ollama(prompt: str):
 
     payload = {
-
         "model": MODEL,
-
         "prompt": prompt,
-
         "stream": True,
-
-        "keep_alive": "30m",
-
-        "options": {
-
-            "temperature": 0.0,
-
-            "num_predict": 300,
-
-            "num_ctx": 4096,
-
-            "top_k": 10,
-
-            "top_p": 0.5
-
-        }
-
+        "options": OLLAMA_OPTIONS,
     }
 
     print(
-        "\n🌊 Starting Ollama stream..."
+        "\nStarting Ollama stream..."
     )
 
     print(
-        "Streaming prompt length:",
-        len(prompt)
+        f"Streaming prompt length: {len(prompt)} characters"
     )
 
     try:
 
         response = requests.post(
-
             OLLAMA_URL,
-
             json=payload,
-
             stream=True,
-
-            timeout=120
-
+            timeout=180
         )
 
         response.raise_for_status()
 
-    except requests.exceptions.ConnectionError:
-
-        print(
-            "❌ Could not connect to Ollama."
-        )
-
-        return
-
-    except requests.exceptions.Timeout:
-
-        print(
-            "❌ Ollama streaming request timed out."
-        )
-
-        return
-
-    except requests.exceptions.RequestException as e:
-
-        print(
-            "❌ Ollama streaming error:",
-            e
-        )
-
-        return
-
-    try:
-
-        for line in response.iter_lines(
-            decode_unicode=True
-        ):
+        for line in response.iter_lines():
 
             if not line:
                 continue
 
-            # IMPORTANT:
-            # Ollama returns one JSON object per line.
-            #
-            # We return the complete JSON line to the
-            # FastAPI streaming endpoint.
-            #
-            # The frontend should parse the Ollama JSON
-            # and use the "response" field.
-
             yield line
 
-    finally:
+    except Exception as exc:
 
-        response.close()
+        print(
+            f"Ollama streaming failed: {exc}"
+        )
+
+        yield (
+            '{"response":"Unable to generate an answer.","done":true}'
+            .encode("utf-8")
+        )
 
 
 # ============================================================
-# UNCACHED AI ROUTER
+# INTERNAL AI
 # ============================================================
 
 def _ask_ai_uncached(
-    message: str,
-    file_id: str | None = None
+    question: str,
+    file_id: Optional[str] = None
 ):
 
-    total_start = time.time()
-
-    question = normalize_question(
-        message
-    )
-
-    print(
-        "\n" + "=" * 70
-    )
-
-    print(
-        "🤖 AI REQUEST"
-    )
-
-    print(
-        "QUESTION:",
-        message
-    )
-
-    print(
-        "FILE ID:",
-        file_id
-    )
-
-    print(
-        "=" * 70
-    )
+    question = question.strip()
 
     # ========================================================
-    # 1. GREETING
+    # GREETING
     # ========================================================
 
     if is_greeting(question):
 
         print(
-            "\n👋 GREETING DETECTED"
+            "Greeting detected."
         )
 
-        print(
-            "🚫 RAG SEARCH SKIPPED"
-        )
-
-        print(
-            "🚫 CSV SEARCH SKIPPED"
-        )
-
-        return greeting_response()
+        return {
+            "response": greeting_response(),
+            "sources": [],
+            "type": "llm",
+        }
 
     # ========================================================
-    # 2. SOURCE DETECTION
+    # SOURCE
     # ========================================================
 
     source = detect_source(
@@ -952,736 +1077,359 @@ def _ask_ai_uncached(
     )
 
     print(
-        "\n========== SOURCE DETECTION =========="
-    )
-
-    print(
-        "CSV dataset:",
-        source["csv_dataset"]
-    )
-
-    print(
-        "CSV operation:",
-        source["csv_operation"]
-    )
-
-    print(
-        "CSV name:",
-        source["csv_name"]
-    )
-
-    print(
-        "PDF:",
-        source["pdf"]
-    )
-
-    print(
-        "======================================"
+        f"Detected source: {source}"
     )
 
     # ========================================================
-    # 3. UPLOADED FILE MODE
+    # CSV
     # ========================================================
 
-    # IMPORTANT:
-    #
-    # file_id ALWAYS takes priority.
-    #
-    # Even if the question does not contain the word
-    # "report" or "PDF", the presence of file_id means
-    # the user is asking against the uploaded PDF.
-
-    if file_id:
+    if source == "csv":
 
         print(
-            "\n📎 UPLOADED FILE MODE"
+            "CSV question detected."
         )
-
-        print(
-            "File ID:",
-            file_id
-        )
-
-        pdf_start = time.time()
 
         try:
 
-            results = retriever.search(
-
-                message,
-
-                file_id=file_id
-
+            csv_answer = csv_ai_service.answer(
+                question
             )
 
-        except Exception as e:
+            if isinstance(
+                csv_answer,
+                dict
+            ):
 
-            print(
-                "❌ Uploaded PDF retrieval error:",
-                e
-            )
+                return csv_answer
 
             return {
-
-                "answer":
-                    "There was an error reading "
-                    "the uploaded PDF.",
-
-                "sources": [],
-
-                "type":
-                    "pdf"
-
-            }
-
-        pdf_time = (
-            time.time()
-            - pdf_start
-        )
-
-        print(
-            "📄 Uploaded PDF retrieval time:",
-            round(
-                pdf_time,
-                2
-            ),
-            "seconds"
-        )
-
-        print(
-            "📄 Retrieved chunks:",
-            len(results)
-        )
-
-        if not results:
-
-            print(
-                "❌ No results found in uploaded file"
-            )
-
-            return {
-
-                "answer":
-                    no_pdf_information_response(
-                        uploaded=True
-                    ),
-
-                "sources": [],
-
-                "type":
-                    "pdf"
-
-            }
-
-        # ----------------------------------------------------
-        # Keep strongest results
-        # ----------------------------------------------------
-
-        top_results = results[:6]
-
-        print(
-            "📄 Chunks sent to Ollama:",
-            len(top_results)
-        )
-
-        # ----------------------------------------------------
-        # Build context
-        # ----------------------------------------------------
-
-        context = build_pdf_context(
-            top_results
-        )
-
-        print(
-            "Context length:",
-            len(context)
-        )
-
-        if not context.strip():
-
-            print(
-                "❌ Uploaded PDF context is empty"
-            )
-
-            return {
-
-                "answer":
-                    no_pdf_information_response(
-                        uploaded=True
-                    ),
-
-                "sources": [],
-
-                "type":
-                    "pdf"
-
-            }
-
-        # ----------------------------------------------------
-        # Build prompt
-        # ----------------------------------------------------
-
-        prompt = build_pdf_prompt(
-
-            message,
-
-            context,
-
-            uploaded=True
-
-        )
-
-        print(
-            "Prompt length:",
-            len(prompt)
-        )
-
-        # ----------------------------------------------------
-        # Ask Ollama
-        # ----------------------------------------------------
-
-        ollama_start = time.time()
-
-        answer = ask_ollama(
-            prompt
-        )
-
-        print(
-            "🤖 Uploaded PDF Ollama time:",
-            round(
-                time.time()
-                - ollama_start,
-                2
-            ),
-            "seconds"
-        )
-
-        # ----------------------------------------------------
-        # Sources
-        # ----------------------------------------------------
-
-        sources = build_pdf_sources(
-            top_results
-        )
-
-        total_time = (
-            time.time()
-            - total_start
-        )
-
-        print(
-            "⏱️ Uploaded PDF AI time:",
-            round(
-                total_time,
-                2
-            ),
-            "seconds"
-        )
-
-        return {
-
-            "answer":
-                answer,
-
-            "sources":
-                sources,
-
-            "type":
-                "pdf"
-
-        }
-
-    # ========================================================
-    # 4. HYBRID CSV + PDF
-    # ========================================================
-
-    if (
-        source["csv_dataset"]
-        and source["pdf"]
-    ):
-
-        print(
-            "\n🔀 HYBRID QUESTION DETECTED"
-        )
-
-        # ----------------------------------------------------
-        # CSV
-        # ----------------------------------------------------
-
-        csv_start = time.time()
-
-        csv_result = (
-            csv_ai_service.answer(
-                message
-            )
-        )
-
-        csv_time = (
-            time.time()
-            - csv_start
-        )
-
-        print(
-            "📊 CSV processing time:",
-            round(
-                csv_time,
-                2
-            ),
-            "seconds"
-        )
-
-        csv_answer = csv_result.get(
-
-            "answer",
-
-            "No relevant CSV result was found."
-
-        )
-
-        # ----------------------------------------------------
-        # PDF
-        # ----------------------------------------------------
-
-        pdf_start = time.time()
-
-        pdf_results = retriever.search(
-            message
-        )
-
-        pdf_time = (
-            time.time()
-            - pdf_start
-        )
-
-        print(
-            "📄 PDF retrieval time:",
-            round(
-                pdf_time,
-                2
-            ),
-            "seconds"
-        )
-
-        top_pdf_results = pdf_results[:3]
-
-        pdf_context = build_pdf_context(
-            top_pdf_results
-        )
-
-        if not pdf_context:
-
-            pdf_context = (
-                "No relevant ESS PDF "
-                "information was found."
-            )
-
-        # ----------------------------------------------------
-        # Prompt
-        # ----------------------------------------------------
-
-        prompt = build_hybrid_prompt(
-
-            message,
-
-            csv_answer,
-
-            pdf_context
-
-        )
-
-        # ----------------------------------------------------
-        # Ollama
-        # ----------------------------------------------------
-
-        answer = ask_ollama(
-            prompt
-        )
-
-        sources = build_pdf_sources(
-            top_pdf_results
-        )
-
-        sources.append({
-
-            "document":
-                "ESS CSV Dataset",
-
-            "category":
-                "CSV"
-
-        })
-
-        return {
-
-            "answer":
-                answer,
-
-            "sources":
-                sources,
-
-            "type":
-                "hybrid"
-
-        }
-
-    # ========================================================
-    # 5. CSV ONLY
-    # ========================================================
-
-    if (
-        source["csv_dataset"]
-        or source["csv_operation"]
-        or source["csv_name"]
-    ):
-
-        print(
-            "\n📊 CSV QUESTION DETECTED"
-        )
-
-        csv_start = time.time()
-
-        csv_result = (
-            csv_ai_service.answer(
-                message
-            )
-        )
-
-        csv_time = (
-            time.time()
-            - csv_start
-        )
-
-        print(
-            "📊 CSV processing time:",
-            round(
-                csv_time,
-                2
-            ),
-            "seconds"
-        )
-
-        return {
-
-            "answer":
-                csv_result.get(
-                    "answer",
-                    "No relevant CSV result was found."
+                "response": str(
+                    csv_answer
                 ),
+                "sources": [],
+                "type": "csv",
+            }
 
-            "sources": [
+        except Exception as exc:
 
-                {
+            print(
+                f"CSV service failed: {exc}"
+            )
 
-                    "document":
-                        "ESS CSV Dataset",
+            return {
+                "response": (
+                    "I could not process the requested "
+                    "ESS dataset information."
+                ),
+                "sources": [],
+                "type": "csv",
+            }
 
-                    "category":
-                        "CSV"
+    # ========================================================
+    # PDF
+    # ========================================================
 
-                }
+    print(
+        "\nESS-WIDE SEARCH"
+    )
 
-            ],
+    retrieval_query = build_retrieval_query(
+        question
+    )
 
-            "type":
-                "csv"
+    print(
+        f"Retrieval query: {retrieval_query}"
+    )
 
+    # ========================================================
+    # RETRIEVE
+    # ========================================================
+
+    try:
+
+        if file_id:
+
+            print(
+                f"Searching uploaded file: {file_id}"
+            )
+
+            results = retriever.search(
+                retrieval_query,
+                file_id=file_id
+            )
+
+        else:
+
+            results = retriever.search(
+                retrieval_query
+            )
+
+    except TypeError:
+
+        # Backward compatibility
+        results = retriever.search(
+            retrieval_query
+        )
+
+    except Exception as exc:
+
+        print(
+            f"Retriever failed: {exc}"
+        )
+
+        return {
+            "response": no_pdf_information_response(),
+            "sources": [],
+            "type": "pdf",
         }
 
     # ========================================================
-    # 6. NORMAL ESS PDF / RAG
+    # NO RESULTS
     # ========================================================
-
-    print(
-        "\n📚 SEARCHING ESS PDF DOCUMENTS"
-    )
-
-    pdf_start = time.time()
-
-    results = retriever.search(
-        message
-    )
-
-    pdf_time = (
-        time.time()
-        - pdf_start
-    )
-
-    print(
-        "📄 PDF retrieval time:",
-        round(
-            pdf_time,
-            2
-        ),
-        "seconds"
-    )
 
     if not results:
 
         print(
-            "❌ No PDF results found"
+            "No PDF results found."
         )
 
         return {
-
-            "answer":
-                no_pdf_information_response(
-                    uploaded=False
-                ),
-
+            "response": no_pdf_information_response(),
             "sources": [],
-
-            "type":
-                "pdf"
-
+            "type": "pdf",
         }
 
     print(
-        "✅ Relevant PDF found"
+        f"Raw retrieval results: {len(results)}"
     )
 
-    # Keep strongest chunks
-    top_results = results[:3]
+    # ========================================================
+    # REMOVE DUPLICATES
+    # ========================================================
+
+    unique_results = remove_duplicate_results(
+        results
+    )
+
+    print(
+        f"Unique results after deduplication: "
+        f"{len(unique_results)}"
+    )
+
+    if not unique_results:
+
+        print(
+            "No unique PDF results found."
+        )
+
+        return {
+            "response": no_pdf_information_response(),
+            "sources": [],
+            "type": "pdf",
+        }
+
+    # ========================================================
+    # KEEP BEST RESULTS
+    # ========================================================
+
+    # We previously sent up to 6 chunks.
+    #
+    # That caused large prompts and slow prompt evaluation.
+    #
+    # Now we send only the best 3 UNIQUE chunks.
+    #
+    # This is enough for most ESS questions while preserving
+    # multiple definitions for comparison questions.
+
+    top_results = unique_results[:3]
+
+    print(
+        f"Results sent to Ollama: {len(top_results)}"
+    )
+
+    # ========================================================
+    # PRINT RETRIEVED EVIDENCE
+    # ========================================================
+
+    for index, result in enumerate(
+        top_results,
+        start=1
+    ):
+
+        metadata = result.get(
+            "metadata",
+            {}
+        )
+
+        page = metadata.get(
+            "page",
+            metadata.get(
+                "page_number",
+                "Unknown"
+            )
+        )
+
+        text = result.get(
+            "text",
+            result.get(
+                "content",
+                ""
+            )
+        )
+
+        print(
+            f"\n--- RESULT {index} ---"
+        )
+
+        print(
+            f"PAGE: {page}"
+        )
+
+        print(
+            f"TEXT: {text[:500]}"
+        )
+
+    # ========================================================
+    # CONTEXT
+    # ========================================================
 
     context = build_pdf_context(
         top_results
     )
 
     print(
-        "\n========== FINAL CONTEXT SIZE =========="
-    )
-
-    total_chars = 0
-
-    for item in top_results:
-
-        chars = len(
-            item.get(
-                "text",
-                ""
-            )
-        )
-
-        total_chars += chars
-
-        print(
-
-            item.get(
-                "document"
-            ),
-
-            "page:",
-
-            item.get(
-                "page"
-            ),
-
-            "chars:",
-
-            chars
-
-        )
-
-    print(
-        "Total characters sent:",
-        total_chars
-    )
-
-    print(
-        "========================================"
-    )
-
-    print(
-        "Chunks sent:",
-        len(top_results)
-    )
-
-    print(
-        "Context length:",
-        len(context)
+        f"\nPrompt context length: {len(context)} characters"
     )
 
     if not context.strip():
 
-        print(
-            "❌ Empty PDF context"
-        )
-
         return {
-
-            "answer":
-                no_pdf_information_response(
-                    uploaded=False
-                ),
-
+            "response": no_pdf_information_response(),
             "sources": [],
-
-            "type":
-                "pdf"
-
+            "type": "pdf",
         }
 
+    # ========================================================
+    # PROMPT
+    # ========================================================
+
     prompt = build_pdf_prompt(
-
-        message,
-
-        context,
-
-        uploaded=False
-
+        question,
+        context
     )
 
     print(
-        "Prompt length:",
-        len(prompt)
+        f"Prompt length: {len(prompt)} characters"
     )
+
+    # ========================================================
+    # ASK OLLAMA
+    # ========================================================
+
+    start_time = time.time()
 
     answer = ask_ollama(
         prompt
     )
 
-    unique_sources = build_pdf_sources(
+    ollama_time = time.time() - start_time
+
+    print(
+        f"Ollama generation time: "
+        f"{ollama_time:.2f}s"
+    )
+
+    # ========================================================
+    # SAFETY FALLBACK
+    # ========================================================
+
+    if not answer.strip():
+
+        answer = no_pdf_information_response()
+
+    # ========================================================
+    # SOURCES
+    # ========================================================
+
+    sources = build_pdf_sources(
         top_results
     )
 
-    total_time = (
-        time.time()
-        - total_start
-    )
-
-    print(
-        "⏱️ Total PDF processing time:",
-        round(
-            total_time,
-            2
-        ),
-        "seconds"
-    )
-
     return {
-
-        "answer":
-            answer,
-
-        "sources":
-            unique_sources,
-
-        "type":
-            "pdf"
-
+        "response": answer,
+        "sources": sources,
+        "type": "pdf",
     }
 
 
 # ============================================================
-# CACHED AI ENTRY POINT
+# PUBLIC AI FUNCTION
 # ============================================================
 
 def ask_ai(
-    message: str,
-    file_id: str | None = None
+    question: str,
+    file_id: Optional[str] = None
 ):
 
-    start_time = time.time()
+    if not question:
 
-    print(
-        "\n" + "=" * 70
-    )
+        return {
+            "response": (
+                "Please enter a question."
+            ),
+            "sources": [],
+            "type": "llm",
+        }
 
-    print(
-        "🤖 ASK AI"
-    )
-
-    print(
-        "Message:",
-        message
-    )
-
-    print(
-        "File ID:",
-        file_id
-    )
-
-    print(
-        "=" * 70
-    )
+    question = question.strip()
 
     # ========================================================
     # GREETING
     # ========================================================
 
-    question = normalize_question(
-        message
-    )
-
     if is_greeting(question):
 
-        print(
-            "👋 Greeting detected."
-        )
-
-        print(
-            "🚫 RAG search skipped."
-        )
-
-        print(
-            "🚫 CSV search skipped."
-        )
-
-        return greeting_response()
+        return {
+            "response": greeting_response(),
+            "sources": [],
+            "type": "llm",
+        }
 
     # ========================================================
     # CACHE
     # ========================================================
 
-    cached_result = get_cached_response(
-
-        message,
-
-        file_id=file_id
-
+    cached = get_cached_answer(
+        question,
+        file_id
     )
 
-    if cached_result is not None:
+    if cached is not None:
 
         print(
-            "⚡ Cached response time:",
-            round(
-                time.time()
-                - start_time,
-                4
-            ),
-            "seconds"
+            "AI cache hit."
         )
 
-        return cached_result
-
-    print(
-        "⚡ CACHE MISS"
-    )
+        return cached
 
     # ========================================================
-    # GENERATE RESPONSE
+    # AI
     # ========================================================
 
     result = _ask_ai_uncached(
-
-        message,
-
-        file_id=file_id
-
+        question,
+        file_id
     )
 
     # ========================================================
-    # SAVE RESPONSE
+    # CACHE
     # ========================================================
 
-    save_cached_response(
-
-        message,
-
+    save_cached_answer(
+        question,
         result,
-
-        file_id=file_id
-
+        file_id
     )
 
     return result
